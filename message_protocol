@@ -1,0 +1,69 @@
+Message protocol:
+
+Authentication:
+1--------------------------------------------------------------------
+client -> server:
+
+{
+	"type": "authentication"
+	"order": 1
+	"content": "PubKey(payload)"
+}
+
+decrypt msg["content"] -> payload
+json.load(payload)
+{
+	"user:" "A"
+	"password": "Wa"
+	"nonce": "n1"
+	"publicKey": PubKeyA
+}
+
+
+
+2--------------------------------------------------------------------
+server -> client:
+activeUser: user -> {public key, who he is talking to, }
+If pass is correct:
+{
+	"type": "authentication"
+	"order": 2
+	"content": "PubKey(payload)"
+}
+
+decrypt msg["content"] -> payload
+json.load(payload)
+{
+	"nonce1": N1
+	"nonce2": N2
+
+}
+else:
+{
+	"type": "error"
+	"order": 2
+	"content": "PubKey(payload)"
+}
+(only N1)
+
+
+3---------------------------------------------------------------------
+client -> server:
+
+{
+	"type": "authentication"
+	"order": 3
+	"content": {
+		"sender": A
+		"signature": "[N2]scA"
+	}
+}
+
+4--------------------------------------------------------------------
+server -> client:
+{
+	"type": "authentication"
+	"order": 4
+	"content: "[N2+1]scServer"
+}
+
