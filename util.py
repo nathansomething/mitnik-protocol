@@ -1,3 +1,6 @@
+
+import random
+
 # Helper function for writing to a file
 def write_file(text, path):
     with open(path, 'w') as output_file:
@@ -29,6 +32,10 @@ def asym_decrypt(text, private_key):
             label=None
         )
     )
+
+# Generates a new nonce
+def genNonce():
+    return random.random() * 100000;
 
 # Signs the message, which keeps a record which can later be used to varify
 # the identity of the sender
