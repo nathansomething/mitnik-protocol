@@ -42,7 +42,7 @@ def sign(text, private_key):
     )
     signer.update(text)
     signature = signer.finalize()
-    write_file(signature, 'signature')
+    return signature
 
 # Verify that the message was signed by the correct private key.
 # This ensures that the sender is who they say thay are
