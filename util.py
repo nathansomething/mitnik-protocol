@@ -34,11 +34,11 @@ def asym_encrypt_from_file(text, filename):
         )
         return asym_encrypt(text, public_key)
 
-    
+
 # Helper function for using Asymetric Decryption
-def asym_decrypt(text, private_key):
+def asym_decrypt(cipher_text, private_key):
     return private_key.decrypt(
-        text,
+        cipher_text,
         asym_padding.OAEP(
             mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
@@ -56,8 +56,8 @@ def asym_decrypt_from_file(text, filename):
         return asym_decrypt(text, private_key)
 
 # Generates a new nonce
-def genNonce():
-    return random.random() * 100000
+def gen_nonce():
+    return random.random() * 100000;
 
 # Signs the message, which keeps a record which can later be used to verify
 # the identity of the sender
@@ -87,6 +87,14 @@ def verify(text, signature, public_key):
     try:
         verifier.update(text)
         verifier.verify()
+        return True
     except InvalidSignature:
-        print("The signurate dosen't match the sender's key")
-        sys.exit()
+        return False
+
+def construct_msg(msg_type, order, content):
+    return json.dumps({'type': msg_type, 'order': order, 'content': content})
+
+# Exception Handler for packets
+class InvalidPacketException(Exception):
+	def __init__(self, message):
+		self.message = message
