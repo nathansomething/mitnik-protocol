@@ -3,17 +3,21 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives import hashes
 
+import json
 import random
+
 
 # Helper function for writing to a file
 def write_file(text, path):
     with open(path, 'w') as output_file:
         output_file.write(text)
 
+
 # Helper function for reading from a file
 def read_file(path):
     with open(path, 'r') as input_file:
         return input_file.read()
+
 
 # Helper function for using Asymetric Encryption
 def asym_encrypt(text, public_key):
@@ -25,6 +29,7 @@ def asym_encrypt(text, public_key):
             label=None
         )
     )
+
 
 def asym_encrypt_from_file(text, filename):
      with open(filename, "rb") as key_file:
@@ -40,11 +45,12 @@ def asym_decrypt(cipher_text, private_key):
     return private_key.decrypt(
         cipher_text,
         asym_padding.OAEP(
-            mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA1()),
+            algorithm=hashes.SHA1(),
             label=None
         )
     )
+
 
 def asym_decrypt_from_file(text, filename):
     with open(filename, "rb") as key_file:
@@ -55,9 +61,38 @@ def asym_decrypt_from_file(text, filename):
         )
         return asym_decrypt(text, private_key)
 
+
+def get_private_key(filename):
+    with open(filename, "rb") as key_file:
+        private_key = serialization.load_der_private_key(
+            key_file.read(),
+            password=None,
+            backend=default_backend()
+        )
+        return private_key
+
+
+def get_public_key(filename):
+    with open(filename, "rb") as key_file:
+        public_key = serialization.load_der_public_key(
+            key_file.read(),
+            backend=default_backend()
+        )
+        return public_key
+
+
+def load_public_key(key):
+    public_key = serialization.load_pem_public_key(
+        key,
+        backend=default_backend()
+    )
+    return public_key
+
+
 # Generates a new nonce
 def gen_nonce():
     return random.random() * 100000;
+
 
 # Signs the message, which keeps a record which can later be used to verify
 # the identity of the sender
@@ -72,6 +107,7 @@ def sign(text, private_key):
     signer.update(text)
     signature = signer.finalize()
     return signature
+
 
 # Verify that the message was signed by the correct private key.
 # This ensures that the sender is who they say thay are
@@ -88,13 +124,11 @@ def verify(text, signature, public_key):
         verifier.update(text)
         verifier.verify()
         return True
-    except InvalidSignature:
+
+    except Exception:
+        print "wrong signature"
         return False
+
 
 def construct_msg(msg_type, order, content):
     return json.dumps({'type': msg_type, 'order': order, 'content': content})
-
-# Exception Handler for packets
-class InvalidPacketException(Exception):
-	def __init__(self, message):
-		self.message = message
