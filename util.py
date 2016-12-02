@@ -1,3 +1,7 @@
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from cryptography.hazmat.primitives import hashes
 
 import random
 
@@ -16,12 +20,21 @@ def asym_encrypt(text, public_key):
     return public_key.encrypt(
         text,
         asym_padding.OAEP(
-            mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA1()),
+            algorithm=hashes.SHA1(),
             label=None
         )
     )
 
+def asym_encrypt_from_file(text, filename):
+     with open(filename, "rb") as key_file:
+        public_key = serialization.load_der_public_key(
+            key_file.read(),
+            backend=default_backend()
+        )
+        return asym_encrypt(text, public_key)
+
+    
 # Helper function for using Asymetric Decryption
 def asym_decrypt(text, private_key):
     return private_key.decrypt(
@@ -32,6 +45,10 @@ def asym_decrypt(text, private_key):
             label=None
         )
     )
+
+def asym_decrypt_from_file(text, key_file):
+    key = serialization.load_der_public_key(key_file, backend=default_backend())
+    asym_encrypt(key)
 
 # Generates a new nonce
 def genNonce():
@@ -53,8 +70,7 @@ def sign(text, private_key):
 
 # Verify that the message was signed by the correct private key.
 # This ensures that the sender is who they say thay are
-def verify(text, public_key):
-    signature = read_file('signature')
+def verify(text, signature, public_key):
     verifier = public_key.verifier(
         signature,
         asym_padding.PSS(
