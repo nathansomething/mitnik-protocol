@@ -37,7 +37,6 @@ class AuthenticationHandler():
         self.key = key
         
     def run(self):
-        print "i am here"
         nonce = genNonce()
         firstMessage = self.generateFirstMessage(self.username, self.password, nonce, self.key.public_key())
 
@@ -133,6 +132,13 @@ def main():
     while True:
         if not login:
             authenticate()
+
+        command = raw_input(">>")
+        split = command.split()
+        if split[0] == "list":
+            pass
+        elif split[0] == "connect":
+            pass
 
 
 
