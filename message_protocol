@@ -1,6 +1,7 @@
 Message protocol:
-
-Authentication:
+#####################################################################
+## Authentication:
+#####################################################################
 1--------------------------------------------------------------------
 client -> server:
 
@@ -67,3 +68,26 @@ server -> client:
 	"content: "[N2+1]scServer"
 }
 
+#####################################################################
+## Key Establishment Protocol:
+#####################################################################
+
+client -> server:
+{
+	"type": "key establishment"
+	"order": 1
+	"content": {
+		"message": "pubkeyServer[B]"
+		"signature": "[pubkeyServer[B]]scA"
+	}
+}
+
+client -> server:
+{
+	"type": "key establishment"
+	"order": 3
+	"content": {
+		"message": pubkeyserver(N2)
+		"signature": [pubkeyserver(N2)]scA
+	}
+}

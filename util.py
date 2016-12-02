@@ -46,15 +46,20 @@ def asym_decrypt(text, private_key):
         )
     )
 
-def asym_decrypt_from_file(text, key_file):
-    key = serialization.load_der_public_key(key_file, backend=default_backend())
-    asym_encrypt(key)
+def asym_decrypt_from_file(text, filename):
+    with open(filename, "rb") as key_file:
+        private_key = serialization.load_der_private_key(
+            key_file.read(),
+            password=None,
+            backend=default_backend()
+        )
+        return asym_decrypt(text, private_key)
 
 # Generates a new nonce
 def genNonce():
-    return random.random() * 100000;
+    return random.random() * 100000
 
-# Signs the message, which keeps a record which can later be used to varify
+# Signs the message, which keeps a record which can later be used to verify
 # the identity of the sender
 def sign(text, private_key):
     signer = private_key.signer(
