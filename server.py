@@ -121,7 +121,7 @@ def authentication(order, content, client_address, sock):
         if verify(nonce, signature, client.public_key):
             response = construct_msg(
                 'authentication',
-                2,
+                4,
                 base64.b64encode(sign(str(float(nonce) + 1), PRIVATE_KEY))
             )
         else:
