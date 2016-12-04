@@ -2,6 +2,9 @@ import socket
 from util import *
 import base64
 
+from cryptography.hazmat.primitives import serialization
+
+
 PUBLIC_KEY = get_public_key('server_public_key.der')
 PRIVATE_KEY = get_private_key('server_private_key.der')
 
@@ -21,11 +24,15 @@ class ClientInfo:
 
     def __init__(self, password):
         self.password = password
-        self.ip = ''
-        self.port = ''
+        self.connection_info = None
         self.authentication_nonce = None
         self.active = False
         self.public_key = ''
+        self.key_establishment_nonce = None
+        self.peer_connection_info = None
+        self.peer = None
+        self.sym_key = None
+        self.iv = None
 
     def pair_with(self, peer):
         self.peer = peer
@@ -59,11 +66,13 @@ def authenticate(username, password):
         return False
 
 
-def update_user(username, source_ip, public_key, nonce):
+def update_user(username, source_ip, public_key, nonce, key, iv):
     client = clients[username]
     client.source_ip = source_ip
     client.public_key = public_key
     client.authentication_nonce = str(nonce)
+    client.sym_key = key
+    client.iv = iv
 
 
 def send_error_message(sock, addr):
@@ -81,13 +90,16 @@ def send_error_message(sock, addr):
 def authentication(order, content, client_address, sock):
     if order == 1:
         # Read client packet
+        packet = content['packet']
+        key = content['key']
 
-        decoded_content = asym_decrypt(base64.b64decode(content), PRIVATE_KEY)
+        decoded_content = asym_decrypt(base64.b64decode(packet), PRIVATE_KEY)
         content = json.loads(decoded_content)
         username = content['user']
         password = content['password']
         nonce = content['nonce']
-        public_key = content['publicKey']
+        sym_key = base64.b64decode(content['sym_key'])
+        iv = base64.b64decode(content['iv'])
 
         # Generate a new nonce
         nonce2 = gen_nonce()
@@ -95,9 +107,9 @@ def authentication(order, content, client_address, sock):
         # Make sure the client has a valid username and password
         if authenticate(username, password):
             # Update the active user log
-            pub_key = load_public_key(str(public_key))
-
-            update_user(username, client_address, pub_key, nonce2)
+            pub_key_byte = sym_decrypt(base64.b64decode(key), sym_key, iv)
+            pub_key = load_public_key(pub_key_byte)
+            update_user(username, client_address, pub_key, nonce2, sym_key, iv)
             response = construct_msg(
                 'authentication',
                 2,
@@ -109,7 +121,6 @@ def authentication(order, content, client_address, sock):
                         }), pub_key))
             )
 
-            print response
         else:
             send_error_message(sock, client_address)
 
@@ -124,72 +135,114 @@ def authentication(order, content, client_address, sock):
                 4,
                 base64.b64encode(sign(str(float(nonce) + 1), PRIVATE_KEY))
             )
+            clients[sender].connection_info = client_address
         else:
             send_error_message(sock, client_address)
 
+    else:
+        response = json.dumps({
+            'type': 'error'
+        })
     sock.sendto(response, client_address)
 
 
-# # Establish a shared key between two clients
-# def establishment(order, content, source_ip):
-#     requested_client_identity = ""
-#     if order == 1:
-#         # Read Client Packet
-#         content = asym_decrypt(content, PRIVATE_KEY)
-#         requested_client_identity = content['requested_client']
-#         signature = content['signature']
-#         requested_public_key = get_client_by_username(requested_client_identity)['public_key']
-#         if requested_public_key:
-#             if verify(signature, requested_client_identity, public_key):
-#                 response = construct_msg(
-#                     'establishment',
-#                     1,
-#                     asym_encrypt(json.dumps({
-#                         'requested_public_key': requested_public_key,
-#                         'nonce': get_nonce()
-#                     }), public_key)
-#                 )
-#             else:
-#                 response = construct_msg(
-#                     'error',
-#                     0,
-#                     requested_content = asym_encrypt(json.dumps({
-#                         'message': 'Signature Verification Failed'
-#                     }), public_key)
-#                 )
-#         else:
-#             response = construct_msg(
-#                 'error',
-#                 0,
-#                 requested_content = asym_encrypt(json.dumps({
-#                     'message': 'Public Key Not Found'
-#                 }), public_key)
-#             )
-#         socket.send(response, client_ip)
-#     elif order == 2:
-#         signatrue = content['signatrue']
-#         if verify(signatrue, nonce, public_key):
-#             response = construct_msg(
-#                 'establishment',
-#                 2,
-#                 asym_encrypt(json.dumps({
-#                     'client_connection_request': identity,
-#                     'sender_public_key': public_key,
-#                     'nonce': nonce,
-#                     'signature': sign(get_client_by_username(requested_client_identity)['public_key'], PRIVATE_KEY)
-#                 }))
-#             )
-#             socket.send(response, get_client_by_username(requested_client_identity)['ip'])
-#             client_pairs.append((get_client_by_ip(source_ip)['username'], requested_client_identity))
-#         else:
-#             response = construct_msg(
-#                 'error',
-#                 0,
-#                 asym_encrypt(json.dumps({
-#                     'message': 'Signature Verification Failed'
-#                 }), public_key))
-#             socket.send(response, client_ip)
-#
+# Establish a shared key between two clients
+def establishment(order, content, source_ip, sock):
+    if order == 1:
+        # Read Client Packet
+
+        connection_info = content['connection_info']
+
+        decrypted_connection_info = \
+            json.loads(asym_decrypt(base64.b64decode(connection_info), PRIVATE_KEY))
+
+        sender = decrypted_connection_info['sender']
+        receiver = decrypted_connection_info['receiver']
+
+        sender_public_key = clients[sender].public_key
+        receiver_public_key = clients[receiver].public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        if receiver_public_key:
+            nonce = str(gen_nonce())
+            clients[sender].key_establishment_nonce = nonce
+            clients[sender].peer_connection_info = clients[receiver].connection_info
+            clients[receiver].peer_connection_info = clients[sender].connection_info
+
+            clients[sender].peer = receiver
+            clients[receiver].peer = sender
+
+            packet = {
+                'requested_public_key': receiver_public_key,
+                'nonce': nonce
+            }
+
+            encrypted_packet = \
+                base64.b64encode(sym_encrypt(json.dumps(packet), clients[sender].sym_key, clients[sender].iv))
+
+            print 'finish'
+            response = construct_msg(
+                'key establishment',
+                2,
+                {
+                    'packet': encrypted_packet,
+                    'signature': base64.b64encode(sign(nonce, PRIVATE_KEY))
+                }
+            )
+        else:
+            response = construct_msg(
+                'error',
+                0,
+                content=asym_encrypt(json.dumps({
+                    'message': 'Public Key Not Found'
+                }), sender_public_key)
+            )
+        sock.sendto(response, source_ip)
+
+    elif order == 3:
+        sender = content['sender']
+        sender_public_key = clients[sender].public_key
+        sender_nonce = clients[sender].key_establishment_nonce
+        signature = content['signature']
+
+        receiver = clients[sender].peer
+        if verify(str(sender_nonce), base64.b64decode(signature), sender_public_key):
+            to_encrypt = json.dumps({
+                            'user_request': sender,
+                            'user_connection_info': clients[sender].connection_info,
+                            'sender_public_key': sender_public_key.public_bytes(
+                                                    encoding=serialization.Encoding.PEM,
+                                                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                                                ),
+                            'nonce': sender_nonce,
+                        })
+
+            packet = base64.b64encode(
+                        sym_encrypt(to_encrypt, clients[receiver].sym_key, clients[receiver].iv)
+                    )
+
+            response = construct_msg(
+                'key establishment',
+                4,
+                {
+                    'packet': packet,
+                    'signature': base64.b64encode(sign(packet, PRIVATE_KEY))
+                }
+            )
+
+            sock.sendto(response, clients[sender].peer_connection_info)
+        else:
+            print 'key establishment fail'
+            # response = construct_msg(
+            #     'error',
+            #     0,
+            #     asym_encrypt(json.dumps({
+            #         'message': 'Signature Verification Failed'
+            #     }), public_key))
+            # socket.send(response, client_ip)
+
 #
 # # Logout the client from the server
 # def logout(order, content, source_ip):
@@ -215,8 +268,8 @@ def message():
 
 # Message type categories to send to
 message_types = {
-    "authentication": authentication
-    # "establishment": establishment,
+    "authentication": authentication,
+    "key establishment": establishment
     # "message": message,
     # "logout": logout
 }
@@ -241,18 +294,16 @@ def main():
     print "Server Initialized..."
     while True:
         # Listen for messages from clients
-        data, client_address = sock.recvfrom(1024)
-        try:
-            # Load client data as JSON
-            client_packet = json.loads(data)
-            # Route the message based on type
-            message_types[client_packet['type']](
-                client_packet['order'],
-                client_packet['content'],
-                client_address, sock)
-
-        except Exception as ex:
-            print "exception raised: ", ex
+        data, client_address = sock.recvfrom(2048)
+        print 'recv: '
+        print data
+        # Load client data as JSON
+        client_packet = json.loads(data)
+        # Route the message based on type
+        message_types[client_packet['type']](
+            client_packet['order'],
+            client_packet['content'],
+            client_address, sock)
 
 if __name__ == "__main__":
     main()
