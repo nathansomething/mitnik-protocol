@@ -8,11 +8,8 @@ from cryptography.hazmat.primitives import serialization
 PUBLIC_KEY = get_public_key('server_public_key.der')
 PRIVATE_KEY = get_private_key('server_private_key.der')
 
-# {Username: username, Public Key: public key, IP: ip}
-active_clients = {}
 clients = {}
 
-# (client1, client2)
 client_pairs = []
 
 
@@ -44,26 +41,20 @@ class ClientInfo:
         return self.isActive()
 
 
-# Retrieves a client by username
-def get_client_by_username(username):
-    for client in active_clients:
-        if client['username'] == username:
-            return client
-
-
-# Retrieves a client by ip
-def get_client_by_ip(ip):
-    for client in active_clients:
-        if client['ip'] == ip:
-            return client
-
-
 def authenticate(username, password):
     if username in clients:
-        print clients[username].password
         return password == clients[username].password
     else:
         return False
+
+
+def get_active_user():
+    active = []
+    for client in clients:
+        if client.active:
+            active.append(client)
+
+    return active
 
 
 def update_user(username, source_ip, public_key, nonce, key, iv):
@@ -98,6 +89,7 @@ def authentication(order, content, client_address, sock):
         username = content['user']
         password = content['password']
         nonce = content['nonce']
+
         sym_key = base64.b64decode(content['sym_key'])
         iv = base64.b64decode(content['iv'])
 
@@ -133,9 +125,10 @@ def authentication(order, content, client_address, sock):
             response = construct_msg(
                 'authentication',
                 4,
-                base64.b64encode(sign(str(float(nonce) + 1), PRIVATE_KEY))
+                base64.b64encode(sign(nonce[:-1], PRIVATE_KEY))
             )
             clients[sender].connection_info = client_address
+            print 'client ' + sender + ' has logged in'
         else:
             send_error_message(sock, client_address)
 
@@ -182,7 +175,6 @@ def establishment(order, content, source_ip, sock):
             encrypted_packet = \
                 base64.b64encode(sym_encrypt(json.dumps(packet), clients[sender].sym_key, clients[sender].iv))
 
-            print 'finish'
             response = construct_msg(
                 'key establishment',
                 2,
@@ -295,8 +287,6 @@ def main():
     while True:
         # Listen for messages from clients
         data, client_address = sock.recvfrom(2048)
-        print 'recv: '
-        print data
         # Load client data as JSON
         client_packet = json.loads(data)
         # Route the message based on type

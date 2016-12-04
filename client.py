@@ -60,7 +60,6 @@ class ServerListener(threading.Thread):
 
     def run(self):
         while True:
-            time.sleep(1)
             response, source_address = server_sock.recvfrom(4096)
             try:
 
@@ -140,7 +139,7 @@ class MessageHandler(threading.Thread):
             decoded_response = message
 
             content = decoded_response['content']
-            verify(str(float(authentication_handler.nonce2)+1), base64.b64decode(content), SERVER_PUBLIC_KEY)
+            verify(str(authentication_handler.nonce2[:-1]), base64.b64decode(content), SERVER_PUBLIC_KEY)
 
             global login
             login = True
@@ -541,6 +540,21 @@ class PeerConnectionHandler():
         return json.dumps(fifth_message)
 
 
+class ListHandler:
+    def __init__(self):
+        self.nonce = None
+
+    def run(self):
+        self.nonce = gen_nonce()
+
+        message = {
+            'type': 'list'
+        }
+        packet = {
+            'message': '',
+            'signature': ''
+        }
+
 class Client:
     def __init__(self, username, password, key, sym_key, iv):
         self.key = key
@@ -622,7 +636,7 @@ def main():
         try:
             if not login:
                 current_client = authenticate()
-                time.sleep(3)
+                time.sleep(2)
                 continue
             else:
                 command = raw_input(">> ")

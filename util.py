@@ -7,8 +7,8 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives import hashes
 
 import json
-import random
-
+import os
+import base64
 
 # Helper function for writing to a file
 def write_file(text, path):
@@ -94,7 +94,7 @@ def load_public_key(key):
 
 # Generates a new nonce
 def gen_nonce():
-    return random.random() * 100000;
+    return base64.b64encode(os.urandom(64))
 
 
 # Signs the message, which keeps a record which can later be used to verify
@@ -129,6 +129,7 @@ def verify(text, signature, public_key):
         return True
 
     except Exception:
+        print 'wrong signature'
         return False
 
 
