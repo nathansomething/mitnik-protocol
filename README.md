@@ -13,4 +13,4 @@ To send message from one user to another use:
 send [username] [message]
 ~~~~
 
-where username is the username of the sender and message is the message we want to send
+where username is the username of the sender and message is the message we want to send. The list of users that can be used to login is stored in users.json

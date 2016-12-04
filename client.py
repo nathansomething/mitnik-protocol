@@ -568,7 +568,6 @@ class PeerConnection:
 
 def authenticate():
     global authentication_handler, current_protocol
-    print 'in authenticate'
     username = raw_input(">> Username: ")
     password = raw_input(">> Password: ")
     private_key = rsa.generate_private_key(
