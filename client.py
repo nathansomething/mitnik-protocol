@@ -26,7 +26,6 @@ serverPort = args.sp
 
 server_address = (serverIp, serverPort)
 
-# This port is used to listen to the server
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 keepAlive = True
@@ -37,7 +36,6 @@ current_protocol = None
 current_order = 0
 
 authentication_handler = None
-peer_key_establishment_handler = None
 current_client = None
 
 SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
@@ -162,20 +160,28 @@ class MessageHandler(threading.Thread):
             print "login successfully"
 
     def handle_key_establishment_message(self, message, signature, source_address):
-        global peer_key_establishment_handler
+        peer_key_establishment_handler = None
+        if message['sender'] == 'server':
+            if current_client.receiver in current_client.connections:
+                peer_key_establishment_handler = \
+                    current_client.connections[current_client.receiver].key_establishment_handler
+        else:
+            peer_key_establishment_handler = \
+                current_client.connections[message['sender']].key_establishment_handler
 
         if message['sender'] == 'server':
             key_to_verify = SERVER_PUBLIC_KEY
         else:
             key_to_verify = peer_key_establishment_handler.peer_public_key
 
-        verify(json.dumps(message), signature, key_to_verify)
+        if not verify(json.dumps(message), signature, key_to_verify):
+            print 'receive message with wrong signature'
+            return
 
         if peer_key_establishment_handler is None and message['order'] != 4:
             raise Exception
 
         if message['order'] == 2:
-            print 'recv message 2'
             content = message['content']
 
             packet = sym_decrypt(
@@ -196,20 +202,23 @@ class MessageHandler(threading.Thread):
             self.send_message(third_message, source_address)
 
         elif message['order'] == 4:
-            print 'recv message 4'
             content = message['content']
 
             packet = sym_decrypt(base64.b64decode(content['packet']), current_client.sym_key, current_client.iv)
             packet_load = json.loads(packet)
 
             user_request = packet_load['user_request']
+
             user_connection_info = packet_load['user_connection_info']
 
             sender_public_key = load_public_key(str(packet_load['sender_public_key']))
             nonce = packet_load['nonce']
 
+            connection_info = PeerConnection()
             peer_key_establishment_handler = PeerConnectionHandler(current_client, user_request, None)
             peer_key_establishment_handler.peer_public_key = sender_public_key
+            connection_info.key_establishment_handler = peer_key_establishment_handler
+            current_client.connections[user_request] = connection_info
 
             fifth_message = peer_key_establishment_handler.generate_fifth_message(sender_public_key, nonce)
 
@@ -217,7 +226,6 @@ class MessageHandler(threading.Thread):
             self.send_message(fifth_message, connection_info_tuple)
 
         elif message['order'] == 5:
-            print 'recv message 5'
             content = json.loads(asym_decrypt(base64.b64decode(message['content']), current_client.key))
 
             nonce = content['nonce']
@@ -242,7 +250,6 @@ class MessageHandler(threading.Thread):
             self.send_message(response, source_address)
 
         elif message['order'] == 6:
-            print 'recv message 6'
             content = message['content']
             sender = message['sender']
 
@@ -257,9 +264,7 @@ class MessageHandler(threading.Thread):
 
             shared_key = hash256(str(d.gen_shared_key(key)))
 
-            connection_info = PeerConnection()
-            connection_info.key = shared_key
-            current_client.connections[sender] = connection_info
+            current_client.connections[sender].key = shared_key
 
             nonce = gen_nonce()
 
@@ -280,7 +285,6 @@ class MessageHandler(threading.Thread):
             self.send_message(response, source_address)
 
         elif message['order'] == 7:
-            print 'recv message 7'
             content = message['content']
             key = long(base64.b64decode(content['key']))
             sender = message['sender']
@@ -291,10 +295,8 @@ class MessageHandler(threading.Thread):
             shared_key = hash256(str(peer_key_establishment_handler.diffie_hellman.gen_shared_key(key)))
             iv = os.urandom(16)
 
-            connection = PeerConnection()
-            connection.key = shared_key
-            connection.iv = iv
-            current_client.connections[sender] = connection
+            current_client.connections[sender].key = shared_key
+            current_client.connections[sender].iv = iv
 
             encrypted_nonce = base64.b64encode(sym_encrypt(nonce, shared_key, iv))
 
@@ -316,18 +318,11 @@ class MessageHandler(threading.Thread):
             self.send_message(response, source_address)
 
         elif message['order'] == 8:
-            print 'recv message 8'
             content = message['content']
             sender = message['sender']
             iv = base64.b64decode(asym_decrypt(base64.b64decode(content['iv']), current_client.key))
 
             current_client.connections[sender].iv = iv
-
-            nonce3 = sym_decrypt(
-                base64.b64decode(content['nonce3']),
-                current_client.connections[sender].key,
-                current_client.connections[sender].iv
-            )
 
             nonce4 = content['nonce4']
 
@@ -347,10 +342,8 @@ class MessageHandler(threading.Thread):
             self.send_message(response, source_address)
 
         elif message['order'] == 9:
-            print 'recv message 9'
             content = message['content']
             sender = message['sender']
-            nonce = content['nonce']
 
             mes = peer_key_establishment_handler.message
 
@@ -372,7 +365,6 @@ class MessageHandler(threading.Thread):
             self.send_message(response, source_address)
 
         elif message['order'] == 10:
-            print 'recv message 10'
             content = message['content']
             sender = message['sender']
             message = content['message']
@@ -398,31 +390,6 @@ class MessageHandler(threading.Thread):
 
     def handle_error_message(self, message):
         pass
-
-
-###############################################################################
-## Input listener
-###############################################################################
-
-class InputListener(threading.Thread):
-    def __init__(self, threadId, name, sock):
-        threading.Thread.__init__(self)
-        self.threadId = threadId
-        self.name = name
-        self.sock = sock
-
-    def run(self):
-        global keepAlive
-        while keepAlive:
-            try:
-                message = raw_input("> ")
-            except (KeyboardInterrupt, SystemExit, EOFError):
-                # kills all the thread when user hits ctrl+c
-                keepAlive = False
-                break
-
-            except:
-                break
 
 
 ###############################################################################
@@ -604,10 +571,12 @@ class Client:
         self.connection_info = ('127.0.0.1', server_sock.getsockname()[1])
         self.connections = {}
         self.session_keys = {}
+        self.receiver = None
 
 
 class PeerConnection:
     def __init__(self):
+        self.key_establishment_handler = None
         self.key = None
         self.iv = None
         self.ip = None
@@ -638,26 +607,6 @@ def authenticate():
         print err
 
 
-def send_message(mes, receiver):
-    key = current_client[receiver].key
-    iv = current_client[receiver].iv
-    ip = current_client[receiver].ip
-    port = current_client[receiver].port
-
-    encrypt_mes = sym_encrypt(mes, key, iv)
-
-    response = {
-        'type': 'key establishment',
-        'order': 10,
-        'content': {
-            'sender': current_client.username,
-            'message': base64.b64encode(encrypt_mes)
-        }
-    }
-
-    send_signed_message(response, False, (ip, port), server_sock)
-
-
 def main():
     global login, keepAlive, current_client
 
@@ -683,18 +632,23 @@ def main():
                     list_handler = ListHandler()
                     list_handler.run()
                 elif split[0] == "send":
-                    global peer_key_establishment_handler
 
                     if len(split) != 3:
                         print 'invalid command'
 
                     else:
-                        receiver = split[2]
-
+                        mes = split[2]
+                        receiver = split[1]
                         # if receiver in current_client.connections:
                         #     send_message(split[1], receiver)
 
-                        peer_key_establishment_handler = PeerConnectionHandler(current_client, split[1], receiver)
+                        current_client.receiver = receiver
+
+                        connection = PeerConnection()
+                        peer_key_establishment_handler = PeerConnectionHandler(current_client, receiver, mes)
+                        connection.key_establishment_handler = peer_key_establishment_handler
+                        current_client.connections[receiver] = connection
+
                         peer_key_establishment_handler.run()
 
         except KeyboardInterrupt:

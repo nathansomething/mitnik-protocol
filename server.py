@@ -83,13 +83,13 @@ def update_user(username, source_ip, public_key, nonce, key, iv):
 
 def send_error_message(sock, addr):
     nonce = str(gen_nonce())
-    error_message = {
-        'type': 'error',
-        'message': nonce,
-        'signature': base64.b64encode(sign(nonce, PRIVATE_KEY))
-    }
+    error_message = \
+        {
+            'type': 'error',
+            'message': nonce
+        }
 
-    sock.sendto(json.dumps(error_message), addr)
+    send_signed_message(error_message, True, addr, sock)
 
 
 # Authenticate the user with the server
@@ -127,7 +127,7 @@ def authentication(order, content, client_address, sock):
                             'nonce2': nonce2
                         }), pub_key))
             )
-
+            send_signed_message(response, True, client_address, sock)
         else:
             send_error_message(sock, client_address)
 
@@ -146,15 +146,13 @@ def authentication(order, content, client_address, sock):
             clients[sender].active = True
 
             print 'client ' + sender + ' has logged in'
+
+            send_signed_message(response, True, client_address, sock)
         else:
             send_error_message(sock, client_address)
 
     else:
-        response = json.dumps({
-            'type': 'error'
-        })
-
-    send_signed_message(response, True, client_address, sock)
+        send_error_message(sock, client_address)
 
 
 # Establish a shared key between two clients
