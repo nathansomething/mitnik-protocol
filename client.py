@@ -43,6 +43,22 @@ current_client = None
 SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
 
 
+def send_signed_message(message, need_to_sign, address, sock):
+    if current_client is not None:
+        message['sender'] = current_client.username
+
+    signature = ''
+    if need_to_sign:
+        signature = base64.b64encode(sign(json.dumps(message), current_client.key))
+
+    packet = {
+        'message': message,
+        'signature': signature
+    }
+
+    sock.sendto(json.dumps(packet), address)
+
+
 ###############################################################################
 ## Listener
 ###############################################################################
@@ -60,8 +76,6 @@ class ServerListener(threading.Thread):
 
                 decoded_response = json.loads(response)
 
-                # print 'recv: '
-                # print response
                 message_queue.put((decoded_response, source_address))
             except ValueError:
                 # server sends somthing that cannot be decoded:
@@ -95,7 +109,8 @@ class MessageHandler(threading.Thread):
         while True:
             if not message_queue.empty():
                 packet = message_queue.get()
-                message = packet[0]
+                message = packet[0]['message']
+                signature = base64.b64decode(packet[0]['signature'])
                 source_address = packet[1]
                 message_type = message['type']
                 if message_type == 'error':
@@ -104,7 +119,7 @@ class MessageHandler(threading.Thread):
                     if message_type == 'authentication':
                         self.handle_authentication_message(message, source_address)
                     elif message_type == 'key establishment':
-                        self.handle_key_establishment_message(message, source_address)
+                        self.handle_key_establishment_message(message, signature, source_address)
                     elif message_type == 'list':
                         self.handle_list_message(message, source_address)
 
@@ -130,7 +145,7 @@ class MessageHandler(threading.Thread):
 
                 third_message = authentication_handler.generate_third_authentication_message(signed_nonce2)
 
-                self.server_sock.sendto(third_message, server_address)
+                send_signed_message(third_message, True, source_address, self.server_sock)
 
         if message['order'] == 4:
             decoded_response = message
@@ -146,12 +161,21 @@ class MessageHandler(threading.Thread):
             current_protocol = 'key establishment'
             print "login successfully"
 
-    def handle_key_establishment_message(self, message, source_address):
+    def handle_key_establishment_message(self, message, signature, source_address):
         global peer_key_establishment_handler
+
+        if message['sender'] == 'server':
+            key_to_verify = SERVER_PUBLIC_KEY
+        else:
+            key_to_verify = peer_key_establishment_handler.peer_public_key
+
+        verify(json.dumps(message), signature, key_to_verify)
+
         if peer_key_establishment_handler is None and message['order'] != 4:
             raise Exception
 
         if message['order'] == 2:
+            print 'recv message 2'
             content = message['content']
 
             packet = sym_decrypt(
@@ -169,11 +193,12 @@ class MessageHandler(threading.Thread):
             third_message = peer_key_establishment_handler.generate_third_message(nonce)
             peer_key_establishment_handler.nonce = nonce
 
-            self.server_sock.sendto(third_message, server_address)
+            self.send_message(third_message, source_address)
 
         elif message['order'] == 4:
-
+            print 'recv message 4'
             content = message['content']
+
             packet = sym_decrypt(base64.b64decode(content['packet']), current_client.sym_key, current_client.iv)
             packet_load = json.loads(packet)
 
@@ -189,12 +214,12 @@ class MessageHandler(threading.Thread):
             fifth_message = peer_key_establishment_handler.generate_fifth_message(sender_public_key, nonce)
 
             connection_info_tuple = (str(user_connection_info[0]), user_connection_info[1])
-            self.server_sock.sendto(fifth_message, connection_info_tuple)
+            self.send_message(fifth_message, connection_info_tuple)
 
         elif message['order'] == 5:
+            print 'recv message 5'
             content = json.loads(asym_decrypt(base64.b64decode(message['content']), current_client.key))
 
-            sender = content['sender']
             nonce = content['nonce']
 
             str(nonce) == str(peer_key_establishment_handler.nonce)
@@ -209,18 +234,17 @@ class MessageHandler(threading.Thread):
                 'type': 'key establishment',
                 'order': 6,
                 'content': {
-                    'sender': current_client.username,
                     'key': d_pub_key,
                     'signature': signed_key
                 }
             }
 
-            self.server_sock.sendto(json.dumps(response), source_address)
+            self.send_message(response, source_address)
 
         elif message['order'] == 6:
-
+            print 'recv message 6'
             content = message['content']
-            sender = content['sender']
+            sender = message['sender']
 
             key = content['key']
 
@@ -247,19 +271,19 @@ class MessageHandler(threading.Thread):
                 'type': 'key establishment',
                 'order': 7,
                 'content': {
-                    'sender': current_client.username,
                     'key': base64.b64encode(str(d_pub_key)),
                     'nonce': base64.b64encode(asym_encrypt(str(nonce), peer_key_establishment_handler.peer_public_key)),
                     'signature': base64.b64encode(signature)
                 }
             }
 
-            self.server_sock.sendto(json.dumps(response), source_address)
+            self.send_message(response, source_address)
 
         elif message['order'] == 7:
+            print 'recv message 7'
             content = message['content']
             key = long(base64.b64decode(content['key']))
-            sender = content['sender']
+            sender = message['sender']
 
             nonce = asym_decrypt(base64.b64decode(content['nonce']), current_client.key)
             verify(nonce, base64.b64decode(content['signature']), peer_key_establishment_handler.peer_public_key)
@@ -281,7 +305,6 @@ class MessageHandler(threading.Thread):
                 'type': 'key establishment',
                 'order': 8,
                 'content': {
-                    'sender': current_client.username,
                     'nonce3': encrypted_nonce,
                     'nonce4': nonce4,
                     'iv': base64.b64encode(
@@ -290,11 +313,12 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.server_sock.sendto(json.dumps(response), source_address)
+            self.send_message(response, source_address)
 
         elif message['order'] == 8:
+            print 'recv message 8'
             content = message['content']
-            sender = content['sender']
+            sender = message['sender']
             iv = base64.b64decode(asym_decrypt(base64.b64decode(content['iv']), current_client.key))
 
             current_client.connections[sender].iv = iv
@@ -316,16 +340,16 @@ class MessageHandler(threading.Thread):
                 'type': 'key establishment',
                 'order': 9,
                 'content': {
-                    'sender': current_client.username,
                     'nonce': encrypted_nonce
                 }
             }
 
-            self.server_sock.sendto(json.dumps(response), source_address)
+            self.send_message(response, source_address)
 
         elif message['order'] == 9:
+            print 'recv message 9'
             content = message['content']
-            sender = content['sender']
+            sender = message['sender']
             nonce = content['nonce']
 
             mes = peer_key_establishment_handler.message
@@ -341,16 +365,16 @@ class MessageHandler(threading.Thread):
                 'type': 'key establishment',
                 'order': 10,
                 'content': {
-                    'sender': current_client.username,
                     'message': base64.b64encode(encrypt_mes)
                 }
             }
 
-            self.server_sock.sendto(json.dumps(response), source_address)
+            self.send_message(response, source_address)
 
         elif message['order'] == 10:
+            print 'recv message 10'
             content = message['content']
-            sender = content['sender']
+            sender = message['sender']
             message = content['message']
 
             current_client.connections[sender].ip = source_address[0]
@@ -362,6 +386,9 @@ class MessageHandler(threading.Thread):
             print "from " + sender + ": " + decrypted_message
             sys.stdout.write(">> ")
             sys.stdout.flush()
+
+    def send_message(self, message, source_address):
+        send_signed_message(message, True, source_address, self.server_sock)
 
     def handle_list_message(self, message, source_address):
         user = message['users']
@@ -417,7 +444,7 @@ class AuthenticationHandler():
         first_message = \
             self.generate_first_authentication_message(self.username, self.password, nonce, self.key.public_key())
 
-        server_sock.sendto(first_message, server_address)
+        send_signed_message(first_message, False, server_address, server_sock)
 
     def generate_first_authentication_message(self, username, password, nonce, public_key):
         first_message = {
@@ -449,7 +476,7 @@ class AuthenticationHandler():
             'key': encrypted_key
         }
 
-        return json.dumps(first_message)
+        return first_message
 
     def generate_third_authentication_message(self, signed_nonce):
 
@@ -462,7 +489,7 @@ class AuthenticationHandler():
             }
         }
 
-        return json.dumps(third_message)
+        return third_message
 
 
 class PeerConnectionHandler():
@@ -483,7 +510,7 @@ class PeerConnectionHandler():
 
     def run(self):
         first_message = self.generate_first_message()
-        server_sock.sendto(first_message, server_address)
+        send_signed_message(first_message, True, server_address, server_sock)
 
     def generate_first_message(self):
         first_message = {
@@ -506,7 +533,7 @@ class PeerConnectionHandler():
 
         first_message['content'] = content
 
-        return json.dumps(first_message)
+        return first_message
 
     def generate_third_message(self, nonce):
         third_message = {
@@ -523,7 +550,7 @@ class PeerConnectionHandler():
 
         third_message['content'] = content
 
-        return json.dumps(third_message)
+        return third_message
 
     def generate_fifth_message(self, public_key, nonce):
         fifth_message = {
@@ -540,7 +567,7 @@ class PeerConnectionHandler():
         content_byte = base64.b64encode(asym_encrypt(json.dumps(content), public_key))
         fifth_message['content'] = content_byte
 
-        return json.dumps(fifth_message)
+        return fifth_message
 
 
 class ListHandler:
@@ -563,7 +590,7 @@ class ListHandler:
             'content': base64.b64encode(signature)
         }
 
-        server_sock.sendto(json.dumps(packet), server_address)
+        send_signed_message(packet, True, server_address, server_sock)
 
 
 class Client:
@@ -628,7 +655,7 @@ def send_message(mes, receiver):
         }
     }
 
-    server_sock.sendto(json.dumps(response), (ip, port))
+    send_signed_message(response, False, (ip, port), server_sock)
 
 
 def main():

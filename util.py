@@ -169,4 +169,4 @@ def hash256(text):
 
 
 def construct_msg(msg_type, order, content):
-    return json.dumps({'type': msg_type, 'order': order, 'content': content})
+    return {'type': msg_type, 'order': order, 'content': content}

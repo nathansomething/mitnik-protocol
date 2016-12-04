@@ -41,6 +41,21 @@ class ClientInfo:
         return self.isActive()
 
 
+def send_signed_message(message, need_to_sign, address, sock):
+    message['sender'] = 'server'
+
+    signature = ''
+    if need_to_sign:
+        signature = base64.b64encode(sign(json.dumps(message), PRIVATE_KEY))
+
+    packet = {
+        'message': message,
+        'signature': signature
+    }
+
+    sock.sendto(json.dumps(packet), address)
+
+
 def authenticate(username, password):
     if username in clients:
         return password == clients[username].password
@@ -138,7 +153,8 @@ def authentication(order, content, client_address, sock):
         response = json.dumps({
             'type': 'error'
         })
-    sock.sendto(response, client_address)
+
+    send_signed_message(response, True, client_address, sock)
 
 
 # Establish a shared key between two clients
@@ -193,7 +209,8 @@ def establishment(order, content, source_ip, sock):
                     'message': 'Public Key Not Found'
                 }), sender_public_key)
             )
-        sock.sendto(response, source_ip)
+
+        send_signed_message(response, True, source_ip, sock)
 
     elif order == 3:
         sender = content['sender']
@@ -226,7 +243,8 @@ def establishment(order, content, source_ip, sock):
                 }
             )
 
-            sock.sendto(response, clients[sender].peer_connection_info)
+            send_signed_message(response, True, clients[sender].peer_connection_info, sock)
+
         else:
             print 'key establishment fail'
             # response = construct_msg(
@@ -264,7 +282,7 @@ def list_user(order, content, source_ip, sock):
         'users': active_users
     }
 
-    sock.sendto(json.dumps(response), source_ip)
+    send_signed_message(response, True, source_ip, sock)
 
 
 def message():
@@ -301,7 +319,7 @@ def main():
         # Listen for messages from clients
         data, client_address = sock.recvfrom(2048)
         # Load client data as JSON
-        client_packet = json.loads(data)
+        client_packet = json.loads(data)['message']
         # Route the message based on type
         message_types[client_packet['type']](
             client_packet['order'],
