@@ -51,7 +51,7 @@ def authenticate(username, password):
 def get_active_user():
     active = []
     for client in clients:
-        if client.active:
+        if clients[client].active:
             active.append(client)
 
     return active
@@ -128,6 +128,8 @@ def authentication(order, content, client_address, sock):
                 base64.b64encode(sign(nonce[:-1], PRIVATE_KEY))
             )
             clients[sender].connection_info = client_address
+            clients[sender].active = True
+
             print 'client ' + sender + ' has logged in'
         else:
             send_error_message(sock, client_address)
@@ -255,13 +257,24 @@ def establishment(order, content, source_ip, sock):
 #     # Message other member to let them know logged out
 
 
+def list_user(order, content, source_ip, sock):
+    active_users = get_active_user()
+    response = {
+        'type': 'list',
+        'users': active_users
+    }
+
+    sock.sendto(json.dumps(response), source_ip)
+
+
 def message():
     pass
 
 # Message type categories to send to
 message_types = {
-    "authentication": authentication,
-    "key establishment": establishment
+    'authentication': authentication,
+    'key establishment': establishment,
+    'list': list_user
     # "message": message,
     # "logout": logout
 }

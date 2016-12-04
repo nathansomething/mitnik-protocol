@@ -29,11 +29,6 @@ server_address = (serverIp, serverPort)
 # This port is used to listen to the server
 server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# This port is used to listen to peer
-peerSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-peerSock.setblocking(0)
-peerSockNumber = peerSock.getsockname()[1]
-
 keepAlive = True
 login = False
 
@@ -110,6 +105,8 @@ class MessageHandler(threading.Thread):
                         self.handle_authentication_message(message, source_address)
                     elif message_type == 'key establishment':
                         self.handle_key_establishment_message(message, source_address)
+                    elif message_type == 'list':
+                        self.handle_list_message(message, source_address)
 
     def handle_authentication_message(self, message, source_address):
 
@@ -366,6 +363,12 @@ class MessageHandler(threading.Thread):
             sys.stdout.write(">> ")
             sys.stdout.flush()
 
+    def handle_list_message(self, message, source_address):
+        user = message['users']
+        print "user online: ", ", ".join(user)
+        sys.stdout.write(">> ")
+        sys.stdout.flush()
+
     def handle_error_message(self, message):
         pass
 
@@ -548,12 +551,20 @@ class ListHandler:
         self.nonce = gen_nonce()
 
         message = {
-            'type': 'list'
+            'type': 'list',
+            'nonce': self.nonce
         }
+
+        signature = sign(json.dumps(message), current_client.key)
+
         packet = {
-            'message': '',
-            'signature': ''
+            'type': 'list',
+            'order': 0,
+            'content': base64.b64encode(signature)
         }
+
+        server_sock.sendto(json.dumps(packet), server_address)
+
 
 class Client:
     def __init__(self, username, password, key, sym_key, iv):
@@ -642,7 +653,8 @@ def main():
                 command = raw_input(">> ")
                 split = command.split()
                 if split[0] == "list":
-                    pass
+                    list_handler = ListHandler()
+                    list_handler.run()
                 elif split[0] == "send":
                     global peer_key_establishment_handler
 
