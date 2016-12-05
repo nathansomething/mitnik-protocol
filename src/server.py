@@ -7,13 +7,12 @@ import sys
 from cryptography.hazmat.primitives import serialization
 
 
-PUBLIC_KEY = get_public_key('server_public_key.der')
-PRIVATE_KEY = get_private_key('server_private_key.der')
+PUBLIC_KEY = get_public_key(ROOT_DIR + '/server_public_key.der')
+PRIVATE_KEY = get_private_key(ROOT_DIR + '/server_private_key.der')
 
 clients = {}
 connections = {}
 client_pairs = []
-
 
 ###############################################################################
 ## Client info
@@ -343,7 +342,7 @@ def client_thread(conn):
 def main():
     print "Server Initialized..."
 
-    with open('server.json') as server_config_file:
+    with open(ROOT_DIR + '/server.json') as server_config_file:
         server_config_data = json.load(server_config_file)
 
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -351,13 +350,13 @@ def main():
 
     tcp_sock.listen(10)
 
-    with open('users.json') as user_config:
+    with open(ROOT_DIR + '/users.json') as user_config:
         users = json.load(user_config)
         for username in users:
             client = ClientInfo(users[username])
             clients[username] = client
 
-    with open('users.json') as user_config:
+    with open(ROOT_DIR + '/users.json') as user_config:
         users = json.load(user_config)
         for username in users:
             client = ClientInfo(users[username])

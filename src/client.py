@@ -40,7 +40,7 @@ current_order = 0
 authentication_handler = None
 current_client = None
 
-SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
+SERVER_PUBLIC_KEY = get_public_key('src/server_public_key.der')
 
 
 def send_signed_message(message, need_to_sign, sock):
@@ -528,7 +528,7 @@ class PeerConnectionHandler():
         send_signed_message(first_message, True, server_tcp_sock)
 
     def generate_first_message(self):
-        
+
         return construct_msg(
             'key establishment',
             1,

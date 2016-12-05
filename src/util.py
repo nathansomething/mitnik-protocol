@@ -12,6 +12,8 @@ import base64
 
 DEBUG = True
 
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) # This is your Project Root
+
 # Helper function for writing to a file
 def write_file(text, path):
     with open(path, 'w') as output_file:
