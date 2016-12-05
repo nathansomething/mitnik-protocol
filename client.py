@@ -158,7 +158,7 @@ class MessageHandler(threading.Thread):
 
                 authentication_handler.nonce2 = nonce2
 
-                third_message = authentication_handler.generate_third_authentication_message(signed_nonce2)
+                third_message = authentication_handler.generate_third_message(signed_nonce2)
 
                 send_signed_message(third_message, True, self.server_sock)
 
@@ -422,6 +422,8 @@ class MessageHandler(threading.Thread):
 ###############################################################################
 ## Authentication Handler
 ###############################################################################
+
+# Handels the authentication portion of the Mitnick Protocol
 class AuthenticationHandler():
     def __init__(self, username, password, key):
         self.username = username
@@ -433,59 +435,53 @@ class AuthenticationHandler():
         self.iv = os.urandom(16)
 
     def authenticate(self):
-        nonce = gen_nonce()
-        self.nonce1 = nonce
-        first_message = \
-            self.generate_first_authentication_message(self.username, self.password, nonce, self.key.public_key())
-
+        self.nonce1 = gen_nonce()
+        first_message = self.generate_first_message(self.key.public_key())
         send_signed_message(first_message, False, server_tcp_sock)
 
-    def generate_first_authentication_message(self, username, password, nonce, public_key):
-        first_message = {
-            'type': 'authentication',
-            'order': 1
-        }
-
-        content = {
-            'user': username,
-            'password': password,
-            'nonce': nonce,
-            'sym_key': base64.b64encode(self.sym_key),
-            'iv': base64.b64encode(self.iv)
-        }
-
+    def get_encrypted_key(self, public_key):
         public_key_byte = public_key.public_bytes(
                             serialization.Encoding.PEM,
-                            serialization.PublicFormat.SubjectPublicKeyInfo
-                        )
+                            serialization.PublicFormat.SubjectPublicKeyInfo)
 
-        encrypted_key = base64.b64encode(
+        return base64.b64encode(
             sym_encrypt(
                 public_key_byte, self.sym_key, self.iv))
 
-        encoded_content = base64.b64encode(asym_encrypt(json.dumps(content), SERVER_PUBLIC_KEY))
+    # Generates the initial message from the client, instructing the server
+    # to register as active. This allows the client to send messages to
+    # other clinets
+    def generate_first_message(self, public_key):
 
-        first_message["content"] = {
-            'packet': encoded_content,
-            'key': encrypted_key
-        }
+        return construct_msg(
+            'authentication',
+            1,
+            {
+                'packet': base64.b64encode(asym_encrypt(json.dumps({
+                    'user': self.username,
+                    'password': self.password,
+                    'nonce': self.nonce1,
+                    'sym_key': base64.b64encode(self.sym_key),
+                    'iv': base64.b64encode(self.iv)
+                }), SERVER_PUBLIC_KEY)),
+                'key': self.get_encrypted_key(public_key)
+            }
+        )
 
-        return first_message
+    # Confirms to the Server that the client recieved it's message,
+    # and knows that it's been activated
+    def generate_third_message(self, signed_nonce):
 
-    def generate_third_authentication_message(self, signed_nonce):
-
-        third_message = {
-            'type': 'authentication',
-            'order': 3,
-            'content': {
+        return construct_msg(
+            'authentication',
+            3,
+            {
                 'sender': self.username,
                 'signature': base64.b64encode(signed_nonce)
             }
-        }
+        )
 
-        return third_message
-
-
+# Handels P2P connections between clients
 class PeerConnectionHandler():
     def __init__(self, client, peer, message):
         # Username of the person we want to connect to
@@ -494,12 +490,9 @@ class PeerConnectionHandler():
         self.peer_public_key = None
         self.d_public_key = None
         self.nonce = None
-
         self.peer_nonce3 = None
         self.nonce4 = None
-
         self.diffie_hellman = None
-
         self.message = message
 
     def run(self):
