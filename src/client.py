@@ -16,9 +16,14 @@ from cryptography.hazmat.primitives import serialization
 
 from util import *
 
+
+with open('server.json') as server_config_file:
+        server_config_data = json.load(server_config_file)
+
 server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
-    server_tcp_sock.connect(('', 9998))
+    server_tcp_sock.connect((server_config_data['IP'], server_config_data['PORT']))
+
 except:
     print "server is not ready"
     sys.exit()
@@ -30,13 +35,13 @@ peer_sock.listen(10)
 login = False
 
 message_queue = Queue.Queue()
-current_protocol = None
 current_order = 0
 
 authentication_handler = None
 current_client = None
 
 SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
+
 
 def send_signed_message(message, need_to_sign, sock):
     if current_client is not None:
@@ -53,10 +58,11 @@ def send_signed_message(message, need_to_sign, sock):
 
     sock.sendall(json.dumps(packet))
 
+
 ###############################################################################
 ## Listener
 ###############################################################################
-class ServerListener(threading.Thread):
+class MessageListener(threading.Thread):
     def __init__(self, threadId, name, sock):
         threading.Thread.__init__(self)
         self.threadId = threadId
@@ -103,7 +109,7 @@ class PeerListener(threading.Thread):
             conn.setblocking(0)
 
             current_client.connections[current_client.receiver].sock = conn
-            peer_listener = ServerListener(0, current_client.receiver, conn)
+            peer_listener = MessageListener(0, current_client.receiver, conn)
             peer_listener.start()
 
 
@@ -119,7 +125,6 @@ class MessageHandler(threading.Thread):
         pass
 
     def run(self):
-        global current_protocol
         while True:
             if not message_queue.empty():
                 packet = message_queue.get()
@@ -130,12 +135,18 @@ class MessageHandler(threading.Thread):
                 if message_type == 'error':
                     pass
                 else:
-                    if message_type == 'authentication':
-                        self.handle_authentication_message(message, source_address)
-                    elif message_type == 'key establishment':
-                        self.handle_key_establishment_message(message, signature, source_address)
-                    elif message_type == 'list':
-                        self.handle_list_message(message, source_address)
+                    try:
+                        if message_type == 'authentication':
+                            self.handle_authentication_message(message, source_address)
+                        elif message_type == 'key establishment':
+                            self.handle_key_establishment_message(message, signature, source_address)
+                        elif message_type == 'list':
+                            self.handle_list_message(message, source_address)
+
+                    except InvalidNonceException:
+                        print 'receive invalid nonce from ' + message['sender']
+                        sys.stdout.write(">> ")
+                        sys.stdout.flush()
 
     def handle_authentication_message(self, message, source_address):
 
@@ -173,8 +184,6 @@ class MessageHandler(threading.Thread):
             login = True
             authentication_handler = None
 
-            global current_protocol
-            current_protocol = 'key establishment'
             print "login successfully"
 
     def handle_key_establishment_message(self, message, signature, source_address):
@@ -242,7 +251,7 @@ class MessageHandler(threading.Thread):
             connection_info = PeerConnection()
             connection_info.sock = new_socket
 
-            server_listener = ServerListener(1, user_request, new_socket)
+            server_listener = MessageListener(1, user_request, new_socket)
             server_listener.start()
 
             peer_key_establishment_handler = PeerConnectionHandler(current_client, user_request, None)
@@ -350,11 +359,17 @@ class MessageHandler(threading.Thread):
         elif message['order'] == 8:
             content = message['content']
             sender = message['sender']
+
             iv = base64.b64decode(asym_decrypt(base64.b64decode(content['iv']), current_client.key))
 
             current_client.connections[sender].iv = iv
+            nonce3 = sym_decrypt(base64.b64decode(content['nonce3']), current_client.connections[sender].key, iv)
+
+            if nonce3 != peer_key_establishment_handler.nonce3:
+                raise InvalidNonceException("receive invalid nonce")
 
             nonce4 = content['nonce4']
+            peer_key_establishment_handler.nonce4 = nonce4
 
             encrypted_nonce = base64.b64encode(
                 sym_encrypt(str(nonce4),
@@ -375,6 +390,13 @@ class MessageHandler(threading.Thread):
             content = message['content']
             sender = message['sender']
 
+            nonce4 = sym_decrypt(base64.b64decode(content['nonce']),
+                                 current_client.connections[sender].key,
+                                 current_client.connections[sender].iv)
+
+            if nonce4 != peer_key_establishment_handler.nonce4:
+                raise InvalidNonceException("receive invalid nonce")
+
             mes = peer_key_establishment_handler.message
 
             encrypt_mes = sym_encrypt(mes,
@@ -388,7 +410,6 @@ class MessageHandler(threading.Thread):
                     'message': base64.b64encode(encrypt_mes)
                 }
             }
-
 
             self.send_message(response, current_client.connections[sender].sock)
 
@@ -411,6 +432,13 @@ class MessageHandler(threading.Thread):
 
     def handle_list_message(self, message, source_address):
         user = message['users']
+        nonce = str(asym_decrypt(base64.b64decode(message['nonce']), current_client.key))
+
+        if nonce != current_client.list_nonce[:-1]:
+            raise InvalidNonceException('invalid nonce')
+
+        current_client.list_nonce = None
+
         print "user online: ", ", ".join(user)
         sys.stdout.write(">> ")
         sys.stdout.flush()
@@ -490,7 +518,7 @@ class PeerConnectionHandler():
         self.peer_public_key = None
         self.d_public_key = None
         self.nonce = None
-        self.peer_nonce3 = None
+        self.nonce3 = None
         self.nonce4 = None
         self.diffie_hellman = None
         self.message = message
@@ -560,14 +588,15 @@ class PeerConnectionHandler():
 
 class ListHandler:
     def __init__(self):
-        self.nonce = None
+        pass
 
     def run(self):
-        self.nonce = gen_nonce()
+        nonce = gen_nonce()
+        current_client.list_nonce = nonce
 
         message = {
             'type': 'list',
-            'nonce': self.nonce
+            'nonce': nonce
         }
 
         signature = sign(json.dumps(message), current_client.key)
@@ -575,7 +604,10 @@ class ListHandler:
         packet = {
             'type': 'list',
             'order': 0,
-            'content': base64.b64encode(signature)
+            'content': {
+                'nonce': base64.b64encode(asym_encrypt(nonce, SERVER_PUBLIC_KEY)),
+                'user': current_client.username
+            }
         }
 
         send_signed_message(packet, True, server_tcp_sock)
@@ -583,18 +615,26 @@ class ListHandler:
 
 class Client:
     def __init__(self, username, password, key, sym_key, iv):
+        # the private key for this session
         self.key = key
         self.username = username
         self.password = password
+
+        # the symmetric key that is used to communicate with the server
         self.sym_key = sym_key
         self.iv = iv
 
         self.connection_info = ('127.0.0.1', peer_sock.getsockname()[1])
+
+        # username (str) -> PeerConnection
         self.connections = {}
-        self.session_keys = {}
+
+        self.list_nonce = None
+
         self.receiver = None
 
 
+# Essentially a wrapper for PeerConnectionHandler that also include connection information
 class PeerConnection:
     def __init__(self):
         self.key_establishment_handler = None
@@ -605,12 +645,17 @@ class PeerConnection:
         self.sock = None
 
 
+class InvalidNonceException(Exception):
+    def __init__(self, message):
+        self.message = message
+
+
 ###############################################################################
 ## Main functions
 ###############################################################################
 
 def authenticate():
-    global authentication_handler, current_protocol
+    global authentication_handler
     username = raw_input(">> Username: ")
     password = raw_input(">> Password: ")
     private_key = rsa.generate_private_key(
@@ -618,7 +663,6 @@ def authenticate():
         key_size=4096,
         backend=default_backend()
     )
-    current_protocol = 'authentication'
     authentication_handler = AuthenticationHandler(username, password, private_key)
 
     print 'waiting for server response'
@@ -629,18 +673,7 @@ def authenticate():
 def main():
     global login, current_client
 
-    # Parse input parmeters
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-sip", help="server ip", default="localhost")
-    parser.add_argument("-sp", help="server port", type=int, default=9090)
-    args = parser.parse_args()
-
-    serverIp = args.sip
-    serverPort = args.sp
-
-    server_address = (serverIp, serverPort)
-
-    server_listener = ServerListener(1, "server", server_tcp_sock)
+    server_listener = MessageListener(1, "server", server_tcp_sock)
     message_handler = MessageHandler(2, "message listener", server_tcp_sock)
     peer_listener = PeerListener(3, "peer listener")
 

@@ -3,13 +3,12 @@ from util import *
 import base64
 from thread import *
 
+import sys
 from cryptography.hazmat.primitives import serialization
 
 
 PUBLIC_KEY = get_public_key('server_public_key.der')
 PRIVATE_KEY = get_private_key('server_private_key.der')
-
-PORT = 9998
 
 clients = {}
 connections = {}
@@ -60,6 +59,7 @@ def send_signed_message(message, need_to_sign, sock):
 
     sock.sendall(json.dumps(packet))
 
+
 # Authenticates a client's username and password to determine if the
 # match the records stored on the server
 def authenticate(username, password):
@@ -67,6 +67,7 @@ def authenticate(username, password):
         return password == clients[username].password
     else:
         return False
+
 
 # Returns the account's active users
 def get_active_users():
@@ -77,6 +78,7 @@ def get_active_users():
 
     return active
 
+
 # Updates the credentials of the client corresponding
 # to the given username
 def update_user(username, source_ip, public_key, nonce, key, iv):
@@ -86,6 +88,7 @@ def update_user(username, source_ip, public_key, nonce, key, iv):
     client.authentication_nonce = str(nonce)
     client.sym_key = key
     client.iv = iv
+
 
 # Sends an error message to the client if something goes wrong
 def send_error_message(sock, addr):
@@ -274,89 +277,18 @@ def establishment(order, content, source_ip, sock):
             # socket.send(response, client_ip)
 
 
-# # Establish a shared key between two clients
-# def establishment(order, content, source_ip):
-#     requested_client_identity = ""
-#     if order == 1:
-#         # Read Client Packet
-#         content = asym_decrypt(content, PRIVATE_KEY)
-#         requested_client_identity = content['requested_client']
-#         signature = content['signature']
-#         requested_public_key = get_client_by_username(requested_client_identity)['public_key']
-#         if requested_public_key:
-#             if verify(signature, requested_client_identity, public_key):
-#                 response = construct_msg(
-#                     'establishment',
-#                     1,
-#                     asym_encrypt(json.dumps({
-#                         'requested_public_key': requested_public_key,
-#                         'nonce': get_nonce()
-#                     }), public_key)
-#                 )
-#             else:
-#                 response = construct_msg(
-#                     'error',
-#                     0,
-#                     requested_content = asym_encrypt(json.dumps({
-#                         'message': 'Signature Verification Failed'
-#                     }), public_key)
-#                 )
-#         else:
-#             response = construct_msg(
-#                 'error',
-#                 0,
-#                 requested_content = asym_encrypt(json.dumps({
-#                     'message': 'Public Key Not Found'
-#                 }), public_key)
-#             )
-#         socket.send(response, client_ip)
-#     elif order == 2:
-#         signatrue = content['signatrue']
-#         if verify(signatrue, nonce, public_key):
-#             response = construct_msg(
-#                 'establishment',
-#                 2,
-#                 asym_encrypt(json.dumps({
-#                     'client_connection_request': identity,
-#                     'sender_public_key': public_key,
-#                     'nonce': nonce,
-#                     'signature': sign(get_client_by_username(requested_client_identity)['public_key'], PRIVATE_KEY)
-#                 }))
-#             )
-#             socket.send(response, get_client_by_username(requested_client_identity)['ip'])
-#             client_pairs.append((get_client_by_ip(source_ip)['username'], requested_client_identity))
-#         else:
-#             response = construct_msg(
-#                 'error',
-#                 0,
-#                 asym_encrypt(json.dumps({
-#                     'message': 'Signature Verification Failed'
-#                 }), public_key))
-#             socket.send(response, client_ip)
-#
-# # Logout the client from the server
-# def logout(order, content, source_ip):
-#     if (order == 1):
-#         nonce = content['nonce']
-#         signed_username = sign(get_client_by_ip('username'), PRIVATE_KEY)
-#         construct_msg(
-#             'logout',
-#             1,
-#             json.dumps({
-#                 'signature': signed_username,
-#                 'nonce': nonce + 1
-#             })
-#         )
-#     socket.send(response, source_ip)
-#     client_username = get_client_by_ip(source_ip)['username']
-#     # Filter out client pairs with client that just logged output
-#     # Message other member to let them know logged out
-
 # Returns the users currently active on the server
 def list_user(order, content, source_ip, sock):
+
+    user = content['user']
+    if not clients[user].active:
+        return
+
+    nonce = asym_decrypt(base64.b64decode(content['nonce']), PRIVATE_KEY)
     active_users = get_active_users()
     response = {
         'type': 'list',
+        'nonce': base64.b64encode(asym_encrypt(nonce[:-1], clients[user].public_key)),
         'users': active_users
     }
 
@@ -375,11 +307,12 @@ message_types = {
     # "logout": logout
 }
 
+
 def client_thread(conn):
 
     while True:
         try:
-            data, client_address = conn.recvfrom(2048)
+            data, client_address = conn.recvfrom(4096)
 
             # Load client data as JSON
             client_packet = json.loads(data)['message']
@@ -390,6 +323,7 @@ def client_thread(conn):
                 client_address, conn)
 
         except ValueError as e:
+            print e
             for client in clients:
                 if clients[client].sock == conn:
                     clients[client].active = False
@@ -399,21 +333,22 @@ def client_thread(conn):
             break
 
         except Exception as e:
-            pass
+            if e.args[0] == 35:
+                pass
+            else:
+                print e
 
     conn.close()
 
 
 def main():
-    # Get Server Config Info
-    # with open('server.json') as server_config:
-    #     server_config_data = json.loads(server_config)
-
-    # Initialize Socket
     print "Server Initialized..."
 
+    with open('server.json') as server_config_file:
+        server_config_data = json.load(server_config_file)
+
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp_sock.bind(('', PORT))
+    tcp_sock.bind((server_config_data['IP'], server_config_data['PORT']))
 
     tcp_sock.listen(10)
 
@@ -423,19 +358,25 @@ def main():
             client = ClientInfo(users[username])
             clients[username] = client
 
-    while True:
-
-        conn, addr = tcp_sock.accept()
-        conn.setblocking(0)
-        print 'Connected with ' + addr[0] + ':' + str(addr[1])
-
-        start_new_thread(client_thread, (conn,))
-
     with open('users.json') as user_config:
         users = json.load(user_config)
         for username in users:
             client = ClientInfo(users[username])
             clients[username] = client
 
+    while True:
+        conn, addr = tcp_sock.accept()
+        conn.setblocking(0)
+        print 'Connected with ' + addr[0] + ':' + str(addr[1])
+
+        start_new_thread(client_thread, (conn,))
+
+
+
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        sys.exit()
