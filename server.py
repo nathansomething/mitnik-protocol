@@ -205,7 +205,7 @@ def establishment(order, content, source_ip, sock):
             encrypted_packet = \
                 base64.b64encode(sym_encrypt(json.dumps(packet),
                                  clients[sender].sym_key,
-                                 [sender].iv))
+                                 clients[sender].iv))
 
             response = construct_msg(
                 'key establishment',
