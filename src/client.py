@@ -528,63 +528,38 @@ class PeerConnectionHandler():
         send_signed_message(first_message, True, server_tcp_sock)
 
     def generate_first_message(self):
-        first_message = {
-            'type': 'key establishment',
-            'order': 1
-        }
-
-        connection_info = {
-            'sender': self.client.username,
-            'receiver': self.peer,
-            'address': current_client.connection_info
-        }
-
-        encoded_connection_info = \
-            base64.b64encode(asym_encrypt(json.dumps(connection_info), SERVER_PUBLIC_KEY))
-        # signed_username = sign(encoded_connection_info, self.client.key)
-
-        content = {
-            'connection_info': encoded_connection_info
-        }
-
-        first_message['content'] = content
-
-        return first_message
+        
+        return construct_msg(
+            'key establishment',
+            1,
+            base64.b64encode(asym_encrypt(json.dumps({
+                'sender': self.client.username,
+                'receiver': self.peer,
+                'address': current_client.connection_info
+            }),SERVER_PUBLIC_KEY))
+        )
 
     def generate_third_message(self, nonce):
-        third_message = {
-            'type': 'key establishment',
-            'order': 3
-        }
 
         signed_nonce = sign(str(nonce), self.client.key)
-
-        content = {
-            'sender': self.client.username,
-            'signature': base64.b64encode(signed_nonce)
-        }
-
-        third_message['content'] = content
-
-        return third_message
+        return construct_msg(
+            'key establishment',
+            3,
+            {
+                'sender': self.client.username,
+                'signature': base64.b64encode(signed_nonce)
+            }
+        )
 
     def generate_fifth_message(self, public_key, nonce):
-        fifth_message = {
-            'type': 'key establishment',
-            'order': 5,
-
-        }
-
-        content = {
-            'sender': current_client.username,
-            'nonce': nonce
-        }
-
-        content_byte = base64.b64encode(asym_encrypt(json.dumps(content), public_key))
-        fifth_message['content'] = content_byte
-
-        return fifth_message
-
+        return construct_msg(
+            'key establishment',
+            5,
+            base64.b64encode(asym_encrypt(json.dumps({
+                'sender': current_client.username,
+                'nonce': nonce
+            }), public_key))
+        )
 
 class ListHandler:
     def __init__(self):

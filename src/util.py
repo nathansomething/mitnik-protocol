@@ -10,6 +10,7 @@ import json
 import os
 import base64
 
+DEBUG = True
 
 # Helper function for writing to a file
 def write_file(text, path):
@@ -171,3 +172,7 @@ def hash256(text):
 
 def construct_msg(msg_type, order, content):
     return {'type': msg_type, 'order': order, 'content': content}
+
+def debug(info, output):
+    if DEBUG:
+        print info + ': ' + str(output)

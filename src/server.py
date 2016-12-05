@@ -171,21 +171,20 @@ def authentication(order, content, client_address, sock):
 
 # Establish a shared key between two clients
 def establishment(order, content, source_ip, sock):
+
     if order == 1:
-        # Read Client Packet
 
-        connection_info = content['connection_info']
-
-        decrypted_connection_info = \
-            json.loads(asym_decrypt(base64.b64decode(connection_info), PRIVATE_KEY))
+        # Decrypt connection information coming from the client
+        content = json.loads(asym_decrypt(
+                                base64.b64decode(content),PRIVATE_KEY))
+        debug("Connection Info", decrypted_connection_info)
 
         sender = decrypted_connection_info['sender']
         receiver = decrypted_connection_info['receiver']
         address = decrypted_connection_info['address']
+        clients[content['sender']].connection_info = address
 
-        clients[sender].connection_info = address
-
-        sender_public_key = clients[sender].public_key
+        sender_public_key = clients[content['sender']].public_key
         receiver_public_key = clients[receiver].public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -193,12 +192,12 @@ def establishment(order, content, source_ip, sock):
 
         if receiver_public_key:
             nonce = str(gen_nonce())
-            clients[sender].key_establishment_nonce = nonce
-            clients[sender].peer_connection_info = clients[receiver].connection_info
-            clients[receiver].peer_connection_info = clients[sender].connection_info
+            clients[content['sender']].key_establishment_nonce = nonce
+            clients[content['sender']].peer_connection_info = clients[receiver].connection_info
+            clients[content['receiver']].peer_connection_info = clients[sender].connection_info
 
-            clients[sender].peer = receiver
-            clients[receiver].peer = sender
+            clients[content['sender']].peer = content['receiver']
+            clients[content['receiver']].peer = content['sender']
 
             packet = {
                 'requested_public_key': receiver_public_key,
@@ -207,8 +206,8 @@ def establishment(order, content, source_ip, sock):
 
             encrypted_packet = \
                 base64.b64encode(sym_encrypt(json.dumps(packet),
-                                 clients[sender].sym_key,
-                                 clients[sender].iv))
+                                 clients[content['sender']].sym_key,
+                                 clients[content['sender']].iv))
 
             response = construct_msg(
                 'key establishment',
@@ -267,7 +266,7 @@ def establishment(order, content, source_ip, sock):
             send_signed_message(response, True, clients[clients[sender].peer].sock)
 
         else:
-            print 'key establishment fail'
+            print 'key establishment has failed'
             # response = construct_msg(
             #     'error',
             #     0,
