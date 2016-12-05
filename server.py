@@ -1,6 +1,7 @@
 import socket
 from util import *
 import base64
+from thread import *
 
 from cryptography.hazmat.primitives import serialization
 
@@ -8,8 +9,10 @@ from cryptography.hazmat.primitives import serialization
 PUBLIC_KEY = get_public_key('server_public_key.der')
 PRIVATE_KEY = get_private_key('server_private_key.der')
 
-clients = {}
+PORT = 9999
 
+clients = {}
+connections = {}
 client_pairs = []
 
 
@@ -30,6 +33,7 @@ class ClientInfo:
         self.peer = None
         self.sym_key = None
         self.iv = None
+        self.sock = None
 
     def pair_with(self, peer):
         self.peer = peer
@@ -41,7 +45,7 @@ class ClientInfo:
         return self.isActive()
 
 
-def send_signed_message(message, need_to_sign, address, sock):
+def send_signed_message(message, need_to_sign, sock):
     message['sender'] = 'server'
 
     signature = ''
@@ -53,7 +57,7 @@ def send_signed_message(message, need_to_sign, address, sock):
         'signature': signature
     }
 
-    sock.sendto(json.dumps(packet), address)
+    sock.sendall(json.dumps(packet))
 
 
 def authenticate(username, password):
@@ -89,7 +93,7 @@ def send_error_message(sock, addr):
             'message': nonce
         }
 
-    send_signed_message(error_message, True, addr, sock)
+    send_signed_message(error_message, True, sock)
 
 
 # Authenticate the user with the server
@@ -127,7 +131,7 @@ def authentication(order, content, client_address, sock):
                             'nonce2': nonce2
                         }), pub_key))
             )
-            send_signed_message(response, True, client_address, sock)
+            send_signed_message(response, True, sock)
         else:
             send_error_message(sock, client_address)
 
@@ -142,12 +146,13 @@ def authentication(order, content, client_address, sock):
                 4,
                 base64.b64encode(sign(nonce[:-1], PRIVATE_KEY))
             )
-            clients[sender].connection_info = client_address
+
             clients[sender].active = True
+            clients[sender].sock = sock
 
             print 'client ' + sender + ' has logged in'
 
-            send_signed_message(response, True, client_address, sock)
+            send_signed_message(response, True, sock)
         else:
             send_error_message(sock, client_address)
 
@@ -167,6 +172,9 @@ def establishment(order, content, source_ip, sock):
 
         sender = decrypted_connection_info['sender']
         receiver = decrypted_connection_info['receiver']
+        address = decrypted_connection_info['address']
+
+        clients[sender].connection_info = address
 
         sender_public_key = clients[sender].public_key
         receiver_public_key = clients[receiver].public_key.public_bytes(
@@ -208,7 +216,7 @@ def establishment(order, content, source_ip, sock):
                 }), sender_public_key)
             )
 
-        send_signed_message(response, True, source_ip, sock)
+        send_signed_message(response, True, sock)
 
     elif order == 3:
         sender = content['sender']
@@ -241,7 +249,7 @@ def establishment(order, content, source_ip, sock):
                 }
             )
 
-            send_signed_message(response, True, clients[sender].peer_connection_info, sock)
+            send_signed_message(response, True, clients[clients[sender].peer].sock)
 
         else:
             print 'key establishment fail'
@@ -280,7 +288,7 @@ def list_user(order, content, source_ip, sock):
         'users': active_users
     }
 
-    send_signed_message(response, True, source_ip, sock)
+    send_signed_message(response, True, sock)
 
 
 def message():
@@ -296,15 +304,51 @@ message_types = {
 }
 
 
+def client_thread(conn):
+
+    while True:
+        try:
+            data, client_address = conn.recvfrom(2048)
+
+            # Load client data as JSON
+            client_packet = json.loads(data)['message']
+            # Route the message based on type
+            message_types[client_packet['type']](
+                client_packet['order'],
+                client_packet['content'],
+                client_address, conn)
+
+        except ValueError as e:
+            for client in clients:
+                if clients[client].sock == conn:
+                    clients[client].active = False
+
+                    print client + ' has disconnected'
+
+            break
+
+        except Exception as e:
+            pass
+
+    conn.close()
+
+
 def main():
     # Get Server Config Info
     # with open('server.json') as server_config:
     #     server_config_data = json.loads(server_config)
 
     # Initialize Socket
+
+    print "Server Initialized..."
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_address = ('localhost', 9090)
     sock.bind(server_address)
+
+    tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_sock.bind(('', PORT))
+
+    tcp_sock.listen(10)
 
     with open('users.json') as user_config:
         users = json.load(user_config)
@@ -312,17 +356,19 @@ def main():
             client = ClientInfo(users[username])
             clients[username] = client
 
-    print "Server Initialized..."
-    while True:
-        # Listen for messages from clients
-        data, client_address = sock.recvfrom(2048)
-        # Load client data as JSON
-        client_packet = json.loads(data)['message']
-        # Route the message based on type
-        message_types[client_packet['type']](
-            client_packet['order'],
-            client_packet['content'],
-            client_address, sock)
+    while 1:
+
+        conn, addr = tcp_sock.accept()
+        conn.setblocking(0)
+        print 'Connected with ' + addr[0] + ':' + str(addr[1])
+
+        start_new_thread(client_thread, (conn,))
+
+    with open('users.json') as user_config:
+        users = json.load(user_config)
+        for username in users:
+            client = ClientInfo(users[username])
+            clients[username] = client
 
 if __name__ == "__main__":
     main()

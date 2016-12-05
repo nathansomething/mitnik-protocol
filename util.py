@@ -10,6 +10,7 @@ import json
 import os
 import base64
 
+
 # Helper function for writing to a file
 def write_file(text, path):
     with open(path, 'w') as output_file:

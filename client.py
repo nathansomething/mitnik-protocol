@@ -26,7 +26,13 @@ serverPort = args.sp
 
 server_address = (serverIp, serverPort)
 
-server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_tcp_sock.connect(('', 9999))
+
+peer_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+peer_sock.bind(('', 0))
+peer_sock.listen(10)
+
 
 keepAlive = True
 login = False
@@ -41,7 +47,7 @@ current_client = None
 SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
 
 
-def send_signed_message(message, need_to_sign, address, sock):
+def send_signed_message(message, need_to_sign, sock):
     if current_client is not None:
         message['sender'] = current_client.username
 
@@ -54,7 +60,7 @@ def send_signed_message(message, need_to_sign, address, sock):
         'signature': signature
     }
 
-    sock.sendto(json.dumps(packet), address)
+    sock.sendall(json.dumps(packet))
 
 
 ###############################################################################
@@ -69,26 +75,46 @@ class ServerListener(threading.Thread):
 
     def run(self):
         while True:
-            response, source_address = server_sock.recvfrom(4096)
+
             try:
+                response, source_address = self.sock.recvfrom(4096)
+                if response:
+                    decoded_response = json.loads(response)
+                    message_queue.put((decoded_response, source_address))
+                else:
+                    self.gracefully_exit()
 
-                decoded_response = json.loads(response)
-
-                message_queue.put((decoded_response, source_address))
             except ValueError:
                 # server sends somthing that cannot be decoded:
                 print "invalid message from server: ", response
-            except:
-                # server doesn't send anything so ignore
-                pass
+
+            except Exception as e:
+                if e.args[0] == 32:
+                    self.gracefully_exit()
+
+    def gracefully_exit(self):
+        print self.name + ' has disconnected'
+        sys.stdout.write(">> ")
+        sys.stdout.flush()
+        self.sock.close()
+        sys.exit()
 
 
-class Listener(threading.Thread):
-    def __init__(self, threadId, name, sock):
-        pass
+class PeerListener(threading.Thread):
+    def __init__(self, threadId, name):
+        threading.Thread.__init__(self)
+        self.threadId = threadId
+        self.name = name
 
     def run(self):
-        pass
+
+        while True:
+            conn, addr = peer_sock.accept()
+            conn.setblocking(0)
+
+            current_client.connections[current_client.receiver].sock = conn
+            peer_listener = ServerListener(0, current_client.receiver, conn)
+            peer_listener.start()
 
 
 ###############################################################################
@@ -129,6 +155,7 @@ class MessageHandler(threading.Thread):
             raise Exception
 
         if message['order'] == 2:
+
             decoded_response = message
 
             content = decoded_response['content']
@@ -143,9 +170,10 @@ class MessageHandler(threading.Thread):
 
                 third_message = authentication_handler.generate_third_authentication_message(signed_nonce2)
 
-                send_signed_message(third_message, True, source_address, self.server_sock)
+                send_signed_message(third_message, True, self.server_sock)
 
         if message['order'] == 4:
+
             decoded_response = message
 
             content = decoded_response['content']
@@ -182,6 +210,7 @@ class MessageHandler(threading.Thread):
             raise Exception
 
         if message['order'] == 2:
+
             content = message['content']
 
             packet = sym_decrypt(
@@ -199,9 +228,10 @@ class MessageHandler(threading.Thread):
             third_message = peer_key_establishment_handler.generate_third_message(nonce)
             peer_key_establishment_handler.nonce = nonce
 
-            self.send_message(third_message, source_address)
+            self.send_message(third_message, server_tcp_sock)
 
         elif message['order'] == 4:
+
             content = message['content']
 
             packet = sym_decrypt(base64.b64decode(content['packet']), current_client.sym_key, current_client.iv)
@@ -210,11 +240,21 @@ class MessageHandler(threading.Thread):
             user_request = packet_load['user_request']
 
             user_connection_info = packet_load['user_connection_info']
+            connection_info_tuple = (str(user_connection_info[0]), user_connection_info[1])
+
+            new_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+            new_socket.connect(connection_info_tuple)
 
             sender_public_key = load_public_key(str(packet_load['sender_public_key']))
             nonce = packet_load['nonce']
 
             connection_info = PeerConnection()
+            connection_info.sock = new_socket
+
+            server_listener = ServerListener(1, user_request, new_socket)
+            server_listener.start()
+
             peer_key_establishment_handler = PeerConnectionHandler(current_client, user_request, None)
             peer_key_establishment_handler.peer_public_key = sender_public_key
             connection_info.key_establishment_handler = peer_key_establishment_handler
@@ -222,10 +262,10 @@ class MessageHandler(threading.Thread):
 
             fifth_message = peer_key_establishment_handler.generate_fifth_message(sender_public_key, nonce)
 
-            connection_info_tuple = (str(user_connection_info[0]), user_connection_info[1])
-            self.send_message(fifth_message, connection_info_tuple)
+            self.send_message(fifth_message, new_socket)
 
         elif message['order'] == 5:
+            sender = message['sender']
             content = json.loads(asym_decrypt(base64.b64decode(message['content']), current_client.key))
 
             nonce = content['nonce']
@@ -247,7 +287,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, source_address)
+            self.send_message(response, current_client.connections[sender].sock)
 
         elif message['order'] == 6:
             content = message['content']
@@ -282,7 +322,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, source_address)
+            self.send_message(response, current_client.connections[sender].sock)
 
         elif message['order'] == 7:
             content = message['content']
@@ -315,7 +355,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, source_address)
+            self.send_message(response, current_client.connections[sender].sock)
 
         elif message['order'] == 8:
             content = message['content']
@@ -339,7 +379,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, source_address)
+            self.send_message(response, current_client.connections[sender].sock)
 
         elif message['order'] == 9:
             content = message['content']
@@ -351,9 +391,6 @@ class MessageHandler(threading.Thread):
                                       current_client.connections[sender].key,
                                       current_client.connections[sender].iv)
 
-            current_client.connections[sender].ip = source_address[0]
-            current_client.connections[sender].port = source_address[1]
-
             response = {
                 'type': 'key establishment',
                 'order': 10,
@@ -362,15 +399,13 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, source_address)
+
+            self.send_message(response, current_client.connections[sender].sock)
 
         elif message['order'] == 10:
             content = message['content']
             sender = message['sender']
             message = content['message']
-
-            current_client.connections[sender].ip = source_address[0]
-            current_client.connections[sender].port = source_address[1]
 
             decrypted_message = sym_decrypt(
                 base64.b64decode(message), current_client.connections[sender].key, current_client.connections[sender].iv)
@@ -379,8 +414,10 @@ class MessageHandler(threading.Thread):
             sys.stdout.write(">> ")
             sys.stdout.flush()
 
-    def send_message(self, message, source_address):
-        send_signed_message(message, True, source_address, self.server_sock)
+
+    def send_message(self, message, sock):
+        send_signed_message(message, True, sock)
+
 
     def handle_list_message(self, message, source_address):
         user = message['users']
@@ -411,14 +448,14 @@ class AuthenticationHandler():
         first_message = \
             self.generate_first_authentication_message(self.username, self.password, nonce, self.key.public_key())
 
-        send_signed_message(first_message, False, server_address, server_sock)
+        send_signed_message(first_message, False, server_tcp_sock)
 
     def generate_first_authentication_message(self, username, password, nonce, public_key):
         first_message = {
             'type': 'authentication',
             'order': 1
         }
-        
+
         content = {
             'user': username,
             'password': password,
@@ -477,7 +514,7 @@ class PeerConnectionHandler():
 
     def run(self):
         first_message = self.generate_first_message()
-        send_signed_message(first_message, True, server_address, server_sock)
+        send_signed_message(first_message, True, server_tcp_sock)
 
     def generate_first_message(self):
         first_message = {
@@ -487,7 +524,8 @@ class PeerConnectionHandler():
 
         connection_info = {
             'sender': self.client.username,
-            'receiver': self.peer
+            'receiver': self.peer,
+            'address': current_client.connection_info
         }
 
         encoded_connection_info = \
@@ -557,7 +595,7 @@ class ListHandler:
             'content': base64.b64encode(signature)
         }
 
-        send_signed_message(packet, True, server_address, server_sock)
+        send_signed_message(packet, True, server_tcp_sock)
 
 
 class Client:
@@ -568,7 +606,7 @@ class Client:
         self.sym_key = sym_key
         self.iv = iv
 
-        self.connection_info = ('127.0.0.1', server_sock.getsockname()[1])
+        self.connection_info = ('127.0.0.1', peer_sock.getsockname()[1])
         self.connections = {}
         self.session_keys = {}
         self.receiver = None
@@ -581,6 +619,7 @@ class PeerConnection:
         self.iv = None
         self.ip = None
         self.port = None
+        self.sock = None
 
 
 ###############################################################################
@@ -598,26 +637,26 @@ def authenticate():
     )
     current_protocol = 'authentication'
     authentication_handler = AuthenticationHandler(username, password, private_key)
-    try:
-        print 'waiting for server response'
-        authentication_handler.authenticate()
-        return Client(username, password, private_key, authentication_handler.sym_key, authentication_handler.iv)
-    except Exception as err:
-        print "authentication fail"
-        print err
+
+    print 'waiting for server response'
+    authentication_handler.authenticate()
+    return Client(username, password, private_key, authentication_handler.sym_key, authentication_handler.iv)
 
 
 def main():
     global login, keepAlive, current_client
 
-    server_listener = ServerListener(1, "server listener", server_sock)
-    message_handler = MessageHandler(2, "message listener", server_sock)
+    server_listener = ServerListener(1, "server", server_tcp_sock)
+    message_handler = MessageHandler(2, "message listener", server_tcp_sock)
+    peer_listener = PeerListener(3, "peer listener")
 
     server_listener.daemon = True
     message_handler.daemon = True
+    peer_listener.daemon = True
 
     server_listener.start()
     message_handler.start()
+    peer_listener.start()
 
     while True:
         try:
