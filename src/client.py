@@ -16,7 +16,6 @@ from cryptography.hazmat.primitives import serialization
 
 from util import *
 
-
 with open(ROOT_DIR + '/server.json') as server_config_file:
         server_config_data = json.load(server_config_file)
 
@@ -42,8 +41,7 @@ current_client = None
 
 SERVER_PUBLIC_KEY = get_public_key(ROOT_DIR + '/server_public_key.der')
 
-
-def send_signed_message(message, need_to_sign, sock):
+def send_message(message, need_to_sign, sock):
     if current_client is not None:
         message['sender'] = current_client.username
 
@@ -141,7 +139,7 @@ class MessageHandler(threading.Thread):
                         elif message_type == 'key establishment':
                             self.handle_key_establishment_message(message, signature, source_address)
                         elif message_type == 'list':
-                            self.handle_list_message(message, source_address)
+                            self.handle_list_message(message['content'], source_address)
 
                     except InvalidNonceException:
                         print 'receive invalid nonce from ' + message['sender']
@@ -171,7 +169,7 @@ class MessageHandler(threading.Thread):
 
                 third_message = authentication_handler.generate_third_message(signed_nonce2)
 
-                send_signed_message(third_message, True, self.server_sock)
+                send_message(third_message, True, self.server_sock)
 
         if message['order'] == 4:
 
@@ -227,7 +225,7 @@ class MessageHandler(threading.Thread):
             third_message = peer_key_establishment_handler.generate_third_message(nonce)
             peer_key_establishment_handler.nonce = nonce
 
-            self.send_message(third_message, server_tcp_sock)
+            send_message(third_message, True, server_tcp_sock)
 
         elif message['order'] == 4:
 
@@ -261,7 +259,7 @@ class MessageHandler(threading.Thread):
 
             fifth_message = peer_key_establishment_handler.generate_fifth_message(sender_public_key, nonce)
 
-            self.send_message(fifth_message, new_socket)
+            send_message(fifth_message, True, new_socket)
 
         elif message['order'] == 5:
             sender = message['sender']
@@ -286,7 +284,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, current_client.connections[sender].sock)
+            send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 6:
             content = message['content']
@@ -321,7 +319,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, current_client.connections[sender].sock)
+            send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 7:
             content = message['content']
@@ -354,7 +352,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, current_client.connections[sender].sock)
+            send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 8:
             content = message['content']
@@ -384,7 +382,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, current_client.connections[sender].sock)
+            send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 9:
             content = message['content']
@@ -411,7 +409,7 @@ class MessageHandler(threading.Thread):
                 }
             }
 
-            self.send_message(response, current_client.connections[sender].sock)
+            send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 10:
             content = message['content']
@@ -425,21 +423,15 @@ class MessageHandler(threading.Thread):
             sys.stdout.write(">> ")
             sys.stdout.flush()
 
-
-    def send_message(self, message, sock):
-        send_signed_message(message, True, sock)
-
-
-    def handle_list_message(self, message, source_address):
-        user = message['users']
-        nonce = str(asym_decrypt(base64.b64decode(message['nonce']), current_client.key))
+    def handle_list_message(self, content, source_address):
+        nonce = str(asym_decrypt(base64.b64decode(content['nonce']), current_client.key))
 
         if nonce != current_client.list_nonce[:-1]:
             raise InvalidNonceException('invalid nonce')
 
         current_client.list_nonce = None
 
-        print "user online: ", ", ".join(user)
+        print "user online: ", ", ".join(content['users'])
         sys.stdout.write(">> ")
         sys.stdout.flush()
 
@@ -465,7 +457,7 @@ class AuthenticationHandler():
     def authenticate(self):
         self.nonce1 = gen_nonce()
         first_message = self.generate_first_message(self.key.public_key())
-        send_signed_message(first_message, False, server_tcp_sock)
+        send_message(first_message, False, server_tcp_sock)
 
     def get_encrypted_key(self, public_key):
         public_key_byte = public_key.public_bytes(
@@ -525,7 +517,7 @@ class PeerConnectionHandler():
 
     def run(self):
         first_message = self.generate_first_message()
-        send_signed_message(first_message, True, server_tcp_sock)
+        send_message(first_message, True, server_tcp_sock)
 
     def generate_first_message(self):
 
@@ -561,6 +553,7 @@ class PeerConnectionHandler():
             }), public_key))
         )
 
+# Handles the List protocol
 class ListHandler:
     def __init__(self):
         pass
@@ -569,23 +562,16 @@ class ListHandler:
         nonce = gen_nonce()
         current_client.list_nonce = nonce
 
-        message = {
-            'type': 'list',
-            'nonce': nonce
-        }
-
-        signature = sign(json.dumps(message), current_client.key)
-
-        packet = {
-            'type': 'list',
-            'order': 0,
-            'content': {
+        message = construct_msg(
+            'list',
+            0,
+            {
                 'nonce': base64.b64encode(asym_encrypt(nonce, SERVER_PUBLIC_KEY)),
                 'user': current_client.username
             }
-        }
+        )
 
-        send_signed_message(packet, True, server_tcp_sock)
+        send_message(message, True, server_tcp_sock)
 
 
 class Client:
