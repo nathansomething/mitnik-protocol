@@ -270,20 +270,21 @@ def establishment(order, content, source_ip, sock):
 # Returns the users currently active on the server
 def list_user(order, content, source_ip, sock):
 
-    user = content['user']
-    if not clients[user].active:
+    if not clients[content['user']].active:
+        print "ERROR: Must authenticate before using this functionality"
         return
 
     nonce = asym_decrypt(base64.b64decode(content['nonce']), PRIVATE_KEY)
-    active_users = get_active_users()
-    response = {
-        'type': 'list',
-        'nonce': base64.b64encode(asym_encrypt(nonce[:-1], clients[user].public_key)),
-        'users': active_users
-    }
-
+    response = construct_msg(
+        'list',
+        0,
+        {
+            'nonce': base64.b64encode(asym_encrypt(nonce[:-1],
+                                      clients[content['user']].public_key)),
+            'users': get_active_users()
+        }
+    )
     send_signed_message(response, True, sock)
-
 
 def message():
     pass
