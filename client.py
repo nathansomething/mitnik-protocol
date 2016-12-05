@@ -28,7 +28,7 @@ server_address = (serverIp, serverPort)
 
 server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
-    server_tcp_sock.connect(('', 9999))
+    server_tcp_sock.connect(('', 9998))
 except:
     print "server is not ready"
     sys.exit()
@@ -674,11 +674,11 @@ def main():
                     list_handler.run()
                 elif split[0] == "send":
 
-                    if len(split) != 3:
+                    if len(split) < 3:
                         print 'invalid command'
 
                     else:
-                        mes = split[2]
+                        mes = ' '.join(split[2:])
                         receiver = split[1]
                         # if receiver in current_client.connections:
                         #     send_message(split[1], receiver)
@@ -695,7 +695,6 @@ def main():
         except KeyboardInterrupt:
             # in case of exception we will kill all thread
             print "key board interrupt"
-            keepAlive = False
             sys.exit()
 
 

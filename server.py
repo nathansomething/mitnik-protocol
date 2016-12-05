@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import serialization
 PUBLIC_KEY = get_public_key('server_public_key.der')
 PRIVATE_KEY = get_private_key('server_private_key.der')
 
-PORT = 9999
+PORT = 9998
 
 clients = {}
 connections = {}
@@ -345,9 +345,6 @@ def main():
     # Initialize Socket
 
     print "Server Initialized..."
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_address = ('localhost', 9090)
-    sock.bind(server_address)
 
     tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     tcp_sock.bind(('', PORT))
