@@ -14,17 +14,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 
-
 from util import *
-
-parser = argparse.ArgumentParser()
-parser.add_argument("-sip", help="server ip", default="localhost")
-parser.add_argument("-sp", help="server port", type=int, default=9090)
-args = parser.parse_args()
-serverIp = args.sip
-serverPort = args.sp
-
-server_address = (serverIp, serverPort)
 
 server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 try:
@@ -48,7 +38,6 @@ current_client = None
 
 SERVER_PUBLIC_KEY = get_public_key('server_public_key.der')
 
-
 def send_signed_message(message, need_to_sign, sock):
     if current_client is not None:
         message['sender'] = current_client.username
@@ -63,7 +52,6 @@ def send_signed_message(message, need_to_sign, sock):
     }
 
     sock.sendall(json.dumps(packet))
-
 
 ###############################################################################
 ## Listener
@@ -648,6 +636,17 @@ def authenticate():
 def main():
     global login, current_client
 
+    # Parse input parmeters
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-sip", help="server ip", default="localhost")
+    parser.add_argument("-sp", help="server port", type=int, default=9090)
+    args = parser.parse_args()
+
+    serverIp = args.sip
+    serverPort = args.sp
+
+    server_address = (serverIp, serverPort)
+
     server_listener = ServerListener(1, "server", server_tcp_sock)
     message_handler = MessageHandler(2, "message listener", server_tcp_sock)
     peer_listener = PeerListener(3, "peer listener")
@@ -691,6 +690,8 @@ def main():
                         current_client.connections[receiver] = connection
 
                         peer_key_establishment_handler.run()
+                else:
+                    print 'invalid command'
 
         except KeyboardInterrupt:
             # in case of exception we will kill all thread
@@ -701,7 +702,6 @@ def main():
 ###############################################################################
 ## Run program
 ###############################################################################
-            
+
 if __name__ == "__main__":
     main()
-
