@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from util import *
 
 
-with open('server.json') as server_config_file:
+with open(ROOT_DIR + '/server.json') as server_config_file:
         server_config_data = json.load(server_config_file)
 
 server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -40,7 +40,7 @@ current_order = 0
 authentication_handler = None
 current_client = None
 
-SERVER_PUBLIC_KEY = get_public_key('src/server_public_key.der')
+SERVER_PUBLIC_KEY = get_public_key(ROOT_DIR + '/server_public_key.der')
 
 
 def send_signed_message(message, need_to_sign, sock):
