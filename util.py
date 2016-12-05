@@ -137,15 +137,18 @@ def verify(text, signature, public_key):
 def sym_encrypt(text, key, iv):
     block_size = len(iv) * 8
     padded_text = pad(text, block_size)
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key),
+                    modes.CBC(iv),
+                    backend=default_backend())
     encryptor = cipher.encryptor()
     ct = encryptor.update(padded_text) + encryptor.finalize()
     return ct
 
-
 def sym_decrypt(text, key, iv):
     block_size = len(iv) * 8
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key),
+                    modes.CBC(iv),
+                    backend=default_backend())
     decryptor = cipher.decryptor()
     dt = decryptor.update(text) + decryptor.finalize()
     return unpad(dt, block_size)
@@ -156,18 +159,15 @@ def pad(text, block_size):
     padded_data = padder.update(text) + padder.finalize()
     return padded_data
 
-
 def unpad(text, block_size):
     unpadder = padding.PKCS7(block_size).unpadder()
     data = unpadder.update(text) + unpadder.finalize()
     return data
 
-
 def hash256(text):
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
     digest.update(text)
     return str(digest.finalize())
-
 
 def construct_msg(msg_type, order, content):
     return {'type': msg_type, 'order': order, 'content': content}
