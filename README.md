@@ -1,11 +1,13 @@
+In order to run the program, first go to src directory
+
 To start server:
 ~~~~
-python src/server.py
+python server.py
 ~~~~
 
 To start client:
 ~~~~
-python src/client.py
+python client.py
 ~~~~
 
 The user's credentials that can be used to login are stored in users.json. Right now there are 3 users that can be used to login

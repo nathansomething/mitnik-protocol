@@ -3,6 +3,7 @@ from util import *
 import base64
 from thread import *
 
+import sys
 from cryptography.hazmat.primitives import serialization
 
 
@@ -357,6 +358,12 @@ def main():
             client = ClientInfo(users[username])
             clients[username] = client
 
+    with open('users.json') as user_config:
+        users = json.load(user_config)
+        for username in users:
+            client = ClientInfo(users[username])
+            clients[username] = client
+
     while True:
         conn, addr = tcp_sock.accept()
         conn.setblocking(0)
@@ -364,11 +371,12 @@ def main():
 
         start_new_thread(client_thread, (conn,))
 
-    with open('users.json') as user_config:
-        users = json.load(user_config)
-        for username in users:
-            client = ClientInfo(users[username])
-            clients[username] = client
+
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+
+    except KeyboardInterrupt:
+        sys.exit()
