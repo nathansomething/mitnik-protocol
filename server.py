@@ -148,6 +148,10 @@ def authentication(order, content, client_address, sock):
             )
 
             clients[sender].active = True
+
+            # if clients[sender].sock is not None:
+            #     clients[sender].sock.close()
+
             clients[sender].sock = sock
 
             print 'client ' + sender + ' has logged in'

@@ -27,14 +27,16 @@ serverPort = args.sp
 server_address = (serverIp, serverPort)
 
 server_tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_tcp_sock.connect(('', 9999))
+try:
+    server_tcp_sock.connect(('', 9999))
+except:
+    print "server is not ready"
+    sys.exit()
 
 peer_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 peer_sock.bind(('', 0))
 peer_sock.listen(10)
 
-
-keepAlive = True
 login = False
 
 message_queue = Queue.Queue()
@@ -644,7 +646,7 @@ def authenticate():
 
 
 def main():
-    global login, keepAlive, current_client
+    global login, current_client
 
     server_listener = ServerListener(1, "server", server_tcp_sock)
     message_handler = MessageHandler(2, "message listener", server_tcp_sock)
