@@ -298,7 +298,6 @@ message_types = {
     # "logout": logout
 }
 
-
 def client_thread(conn):
 
     while True:
@@ -342,12 +341,6 @@ def main():
     tcp_sock.bind((server_config_data['IP'], server_config_data['PORT']))
 
     tcp_sock.listen(10)
-
-    with open(ROOT_DIR + '/users.json') as user_config:
-        users = json.load(user_config)
-        for username in users:
-            client = ClientInfo(users[username])
-            clients[username] = client
 
     with open(ROOT_DIR + '/users.json') as user_config:
         users = json.load(user_config)
