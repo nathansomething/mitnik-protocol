@@ -338,17 +338,17 @@ class MessageHandler(threading.Thread):
             nonce4 = str(gen_nonce())
             peer_key_establishment_handler.nonce4 = nonce4
 
-            response = {
-                'type': 'key establishment',
-                'order': 8,
-                'content': {
+            response = construct_msg(
+                'key establishment',
+                8,
+                {
                     'nonce3': encrypted_nonce,
                     'nonce4': nonce4,
                     'iv': base64.b64encode(
                         asym_encrypt(base64.b64encode(iv), peer_key_establishment_handler.peer_public_key)
                     )
                 }
-            }
+            )
 
             send_message(response, True, current_client.connections[sender].sock)
 
@@ -372,13 +372,13 @@ class MessageHandler(threading.Thread):
                             current_client.connections[sender].key,
                             current_client.connections[sender].iv))
 
-            response = {
-                'type': 'key establishment',
-                'order': 9,
-                'content': {
+            response = construct_msg(
+                'key establishment',
+                9,
+                {
                     'nonce': encrypted_nonce
                 }
-            }
+            )
 
             send_message(response, True, current_client.connections[sender].sock)
 
@@ -399,13 +399,13 @@ class MessageHandler(threading.Thread):
                                       current_client.connections[sender].key,
                                       current_client.connections[sender].iv)
 
-            response = {
-                'type': 'key establishment',
-                'order': 10,
-                'content': {
+            response = construct_msg(
+                'key establishment',
+                10,
+                {
                     'message': base64.b64encode(encrypt_mes)
                 }
-            }
+            )
 
             send_message(response, True, current_client.connections[sender].sock)
 
