@@ -213,13 +213,13 @@ class MessageHandler(threading.Thread):
             content = message['content']
 
             packet = sym_decrypt(
-                base64.b64decode(content['packet']),
+                base64.b64decode(content),
                 peer_key_establishment_handler.client.sym_key,
                 peer_key_establishment_handler.client.iv)
 
             packet_json = json.loads(packet)
 
-            verify(str(packet_json['nonce']), base64.b64decode(content['signature']), SERVER_PUBLIC_KEY)
+            verify(json.dumps(message), signature, SERVER_PUBLIC_KEY)
 
             peer_key_establishment_handler.peer_public_key = load_public_key(str(packet_json['requested_public_key']))
             nonce = packet_json['nonce']
@@ -233,7 +233,7 @@ class MessageHandler(threading.Thread):
 
             content = message['content']
 
-            packet = sym_decrypt(base64.b64decode(content['packet']), current_client.sym_key, current_client.iv)
+            packet = sym_decrypt(base64.b64decode(content), current_client.sym_key, current_client.iv)
             packet_load = json.loads(packet)
 
             user_request = packet_load['user_request']
@@ -266,7 +266,6 @@ class MessageHandler(threading.Thread):
         elif message['order'] == 5:
             sender = message['sender']
             content = json.loads(asym_decrypt(base64.b64decode(message['content']), current_client.key))
-
             nonce = content['nonce']
 
             str(nonce) == str(peer_key_establishment_handler.nonce)
@@ -277,49 +276,46 @@ class MessageHandler(threading.Thread):
             peer_key_establishment_handler.diffie_hellman = d
             signed_key = base64.b64encode(sign(str(d_pub_key), current_client.key))
 
-            response = {
-                'type': 'key establishment',
-                'order': 6,
-                'content': {
+            response = construct_msg(
+                'key establishment',
+                6,
+                {
                     'key': d_pub_key,
                     'signature': signed_key
                 }
-            }
+            )
 
             send_message(response, True, current_client.connections[sender].sock)
 
         elif message['order'] == 6:
             content = message['content']
             sender = message['sender']
-
             key = content['key']
-
             signature = content['signature']
 
-            verify(str(key), base64.b64decode(signature), peer_key_establishment_handler.peer_public_key)
+            if not verify(str(key),
+                      base64.b64decode(signature),
+                      peer_key_establishment_handler.peer_public_key):
+              print "Verification Failed"
+              return
 
             d = pyDH.DiffieHellman()
             d_pub_key = d.gen_public_key()
-
             shared_key = hash256(str(d.gen_shared_key(key)))
-
             current_client.connections[sender].key = shared_key
-
             nonce = gen_nonce()
-
             peer_key_establishment_handler.nonce3 = nonce
-
             signature = sign(str(nonce), current_client.key)
 
-            response = {
-                'type': 'key establishment',
-                'order': 7,
-                'content': {
+            response = construct_msg(
+                'key establishment',
+                7,
+                {
                     'key': base64.b64encode(str(d_pub_key)),
                     'nonce': base64.b64encode(asym_encrypt(str(nonce), peer_key_establishment_handler.peer_public_key)),
                     'signature': base64.b64encode(signature)
                 }
-            }
+            )
 
             send_message(response, True, current_client.connections[sender].sock)
 

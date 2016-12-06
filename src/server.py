@@ -82,7 +82,6 @@ def update_user(username, source_ip, public_key, nonce, key, iv):
     client.sym_key = key
     client.iv = iv
 
-
 # Sends an error message to the client if something goes wrong
 def send_error_message(sock, addr, msg=''):
     nonce = str(gen_nonce())
@@ -97,6 +96,7 @@ def send_error_message(sock, addr, msg=''):
 def authentication(order, content, client_address, sock):
     if order == 1:
 
+        # Load and decrypt packet info
         packet = json.loads(asym_decrypt(base64.b64decode(
                                             content['packet']),
                                             PRIVATE_KEY))
@@ -106,6 +106,7 @@ def authentication(order, content, client_address, sock):
         # Generate a new nonce
         nonce2 = gen_nonce()
 
+        # Make sure prespective user isn't already active
         if packet['user'] in get_active_users():
             send_error_message(sock,
                                client_address,
@@ -174,6 +175,8 @@ def establishment(order, content, source_ip, sock):
                                     format=serialization.PublicFormat.SubjectPublicKeyInfo
                                 )
 
+        # If the receiver is vaild, pair the sender and the receiver up
+        # with each other
         if receiver_public_key:
             nonce = str(gen_nonce())
             clients[content['sender']].key_establishment_nonce = nonce
@@ -188,15 +191,12 @@ def establishment(order, content, source_ip, sock):
             response = construct_msg(
                 'key establishment',
                 2,
-                {
-                    'packet': base64.b64encode(sym_encrypt(json.dumps({
-                                            'requested_public_key': receiver_public_key,
-                                            'nonce': nonce
-                                        }),
-                                        clients[content['sender']].sym_key,
-                                        clients[content['sender']].iv)),
-                    'signature': base64.b64encode(sign(nonce, PRIVATE_KEY))
-                }
+                base64.b64encode(sym_encrypt(json.dumps({
+                                        'requested_public_key': receiver_public_key,
+                                        'nonce': nonce
+                                    }),
+                                    clients[content['sender']].sym_key,
+                                    clients[content['sender']].iv))
             )
         else:
             send_error_message(sock, client_address, 'Bad Public Key')
@@ -213,27 +213,22 @@ def establishment(order, content, source_ip, sock):
                   base64.b64decode(content['signature']),
                   sender_public_key):
 
-            packet = base64.b64encode(
-                        sym_encrypt(json.dumps({
-                            'user_request': content['sender'],
-                            'user_connection_info': clients[content['sender']].connection_info,
-                            'sender_public_key': sender_public_key.public_bytes(
-                                encoding=serialization.Encoding.PEM,
-                                format=serialization.PublicFormat.SubjectPublicKeyInfo
-                            ),
-                            'nonce': sender_nonce,
-                        }),
-                        clients[receiver].sym_key,
-                        clients[receiver].iv)
-                    )
-
             response = construct_msg(
                 'key establishment',
                 4,
-                {
-                    'packet': packet,
-                    'signature': base64.b64encode(sign(packet, PRIVATE_KEY))
-                }
+                base64.b64encode(
+                            sym_encrypt(json.dumps({
+                                'user_request': content['sender'],
+                                'user_connection_info': clients[content['sender']].connection_info,
+                                'sender_public_key': sender_public_key.public_bytes(
+                                    encoding=serialization.Encoding.PEM,
+                                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                                ),
+                                'nonce': sender_nonce,
+                            }),
+                            clients[receiver].sym_key,
+                            clients[receiver].iv)
+                        )
             )
 
             send_message(response,
@@ -242,14 +237,6 @@ def establishment(order, content, source_ip, sock):
 
         else:
             print 'key establishment has failed'
-            # response = construct_msg(
-            #     'error',
-            #     0,
-            #     asym_encrypt(json.dumps({
-            #         'message': 'Signature Verification Failed'
-            #     }), public_key))
-            # socket.send(response, client_ip)
-
 
 # Returns the users currently active on the server
 def list_user(order, content, source_ip, sock):
