@@ -131,7 +131,9 @@ class MessageHandler(threading.Thread):
                 source_address = packet[1]
                 message_type = message['type']
                 if message_type == 'error':
-                    pass
+                    print message['content']
+                    sys.stdout.write(">> ")
+                    sys.stdout.flush()
                 else:
                     try:
                         if message_type == 'authentication':
