@@ -106,6 +106,12 @@ def authentication(order, content, client_address, sock):
         # Generate a new nonce
         nonce2 = gen_nonce()
 
+        if packet['user'] in get_active_users():
+            send_error_message(sock,
+                               client_address,
+                               "Cannot have two session with the same cerdentials")
+            return
+
         # Make sure the client has a valid username and password
         if authenticate(packet['user'], packet['password']):
             # Update the active user log
@@ -272,8 +278,6 @@ message_types = {
     'authentication': authentication,
     'key establishment': establishment,
     'list': list_user
-    # "message": message,
-    # "logout": logout
 }
 
 def client_thread(conn):
